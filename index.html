@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SB-DPS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header id="topbar" class="topbar glass">
+      <div class="topbar-row">
+        <div class="brand">
+          <span class="logo" aria-hidden="true"></span>
+          <h1>SkyBlock - DPS Calculator</h1>
+        </div>
+        <div id="nav" class="nav" aria-label="Sections"></div>
+        <div id="api-status" class="api-status">Loading items…</div>
+      </div>
+    </header>
+    <!-- Final damage: fixed to the top-right corner, always visible. -->
+    <aside id="hero" class="hero-panel glass" aria-live="polite" aria-label="Single hit damage"></aside>
+    <main class="layout">
+      <form id="config" class="config" autocomplete="off"></form>
+      <aside id="results" class="results"></aside>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

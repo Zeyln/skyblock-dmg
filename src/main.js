@@ -1,0 +1,1268 @@
+import { loadItems, loadPets, loadPetLore, ARMOR_SLOTS } from './api.js';
+import { h } from './dom.js';
+import { combo } from './combo.js';
+import { parseFormatting } from './mctext.js';
+import { detectSets, evaluateSets } from './data/sets.js';
+import {
+  PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
+} from './data/pets.js';
+import {
+  calculate, itemStats, isBow, roman, rarityIndex, reforgeTable, statTierCount, baseTier, recombHasEffect,
+} from './calc.js';
+import {
+  ENCHANTS, POWERS, TUNING_PER_POINT, tuningPoints, powerMultiplier, SHARDS, MOB_TYPES, ENEMIES,
+  ARMOR_REFORGES, RARITIES, GEMS, GEM_QUALITIES, SLOT_ACCEPTS, GEM_FILL_PRIORITY, gemValue,
+  DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
+  POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
+  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, TARGET_FAMILIES, weaponMultipliers,
+  QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
+  DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode,
+} from './data/mechanics.js';
+
+const STATE_KEY = 'dpscalc.state.v1';
+const STAT_LABELS = {
+  DAMAGE: 'Damage', STRENGTH: 'Strength', CRITICAL_DAMAGE: 'Crit Damage', CRITICAL_CHANCE: 'Crit Chance',
+  HEALTH: 'Health', DEFENSE: 'Defense', WALK_SPEED: 'Speed', INTELLIGENCE: 'Intelligence',
+  ATTACK_SPEED: 'Attack Speed', FEROCITY: 'Ferocity',
+};
+const EQUIP_SLOTS = [
+  { key: 'NECKLACE', name: 'Necklace', cats: ['NECKLACE'] },
+  { key: 'CLOAK', name: 'Cloak', cats: ['CLOAK'] },
+  { key: 'BELT', name: 'Belt', cats: ['BELT'] },
+  { key: 'WRIST', name: 'Gloves / Bracelet', cats: ['GLOVES', 'BRACELET'] },
+];
+
+const piece = (extra = {}) => ({ id: '', reforge: 'none', recomb: false, stars: 0, gems: [], hpb: 0, fuming: 0, ...extra });
+const defaultState = () => ({
+  weapon: piece({ enchants: {} }),
+  armor: Object.fromEntries(ARMOR_SLOTS.map((s) => [s, piece()])),
+  equipment: Object.fromEntries(EQUIP_SLOTS.map((s) => [s.key, piece()])),
+  magicalPower: 0,
+  power: 'none',
+  tuning: {},
+  shards: {},
+  pet: { id: '', rarity: 'LEGENDARY', level: 100, item: '' },
+  petExtras: { bankCoins: 0, magicFind: 0, goldDigits: 0 },
+  combatLevel: 0,
+  catacombsLevel: 0,
+  dungeonMode: 'none',
+  dungeonClass: { id: '', level: 50, solo: false },
+  setInputs: {},
+  godPotion: false,
+  bonuses: [
+    { label: 'Pet effects not modeled' }, { label: 'Accessories (flat stats)' }, { label: 'Potions / buffs' }, { label: 'Other' },
+  ],
+  target: {
+    enemy: '', mobs: [], families: [], boss: false, hpPct: 100, maxHp: 0, defense: 0,
+    attackedYou: false, isolated: false, distance: 'normal',
+  },
+  player: { maxHp: 0, firstHit: true, fullHealth: true, lowHealth: false, recentlyHit: false },
+});
+
+let state = loadState();
+let items = null;
+let pets = null; // NEU pet data, or { error } when it could not be loaded
+const petLore = new Map(); // "PET;rarityIdx" -> raw lore lines
+const byId = new Map();
+
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATE_KEY));
+    // Free-form "extra stats" were replaced by anvil controls; drop them so they don't count invisibly.
+    for (const p of [saved?.weapon, ...Object.values(saved?.armor || {}), ...Object.values(saved?.equipment || {})]) {
+      if (p) delete p.extra;
+    }
+    if (saved && 'inDungeon' in saved) {
+      saved.dungeonMode = saved.inDungeon ? 'catacombs' : 'none';
+      delete saved.inDungeon;
+    }
+    if (saved) {
+      const merged = deepMerge(defaultState(), saved);
+      // Presets saved before creature families existed: take them from the preset.
+      const preset = ENEMIES.find((e) => e.name === merged.target.enemy);
+      if (preset && !saved.target?.families) merged.target.families = [...preset.families];
+      return merged;
+    }
+  } catch { /* ignore */ }
+  return defaultState();
+}
+function saveState() {
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+}
+function deepMerge(base, over) {
+  for (const [k, v] of Object.entries(over)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && base[k] && typeof base[k] === 'object') deepMerge(base[k], v);
+    else base[k] = v;
+  }
+  return base;
+}
+
+// ---------- tiny DOM helpers ----------
+const fmt = (n, d = 0) => Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+// Short number for dropdown notes: 1,200,000,000 -> "1.2B".
+const fmtShort = (n) => Number(n).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+
+function getPath(path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), state);
+}
+function setPath(path, value) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  const obj = keys.reduce((o, k) => (o[k] ??= {}), state);
+  obj[last] = value;
+}
+
+function numField(label, path, opts = {}) {
+  return h('label', { class: 'field' }, label,
+    h('input', { type: 'number', step: opts.step ?? 'any', min: opts.min, max: opts.max, value: getPath(path) ?? '',
+      placeholder: opts.placeholder ?? '0', 'data-path': path, 'data-num': '1', 'data-rerender': opts.rerender ? '1' : null }));
+}
+function checkField(label, path) {
+  return h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!getPath(path), 'data-path': path }), label);
+}
+// Option list entries are [value, label] tuples or full combo option objects.
+const toOption = (o) => (Array.isArray(o) ? { value: o[0], label: o[1] } : o);
+
+// Themed dropdown bound to a state path. opts: num, rerender, disabled, searchable, placeholder.
+function selectField(label, path, options, opts = {}) {
+  const list = options.map(toOption);
+  // Unset numeric fields (e.g. enchant levels) show their "0" option ("—") rather than a placeholder.
+  const raw = getPath(path);
+  const value = raw ?? (opts.num && list.some((o) => String(o.value) === '0') ? 0 : '');
+  const sel = combo(list, value, (v) => {
+    setPath(path, opts.num ? (v === '' ? undefined : Number(v)) : v);
+    if (opts.rerender) rerenderForm(); else update();
+  }, { disabled: opts.disabled, searchable: opts.searchable, placeholder: opts.placeholder, className: opts.className,
+    ariaLabel: typeof label === 'string' ? label : undefined });
+  return label ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, label), sel) : sel;
+}
+// Dropdown not bound to state (actions, custom handlers).
+function actionSelect(label, options, value, onSelect, opts = {}) {
+  const sel = combo(options.map(toOption), value, onSelect, opts);
+  return label ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, label), sel) : sel;
+}
+// Greyed-out placeholder dropdown with an explanation.
+const disabledSelect = (label, text) => actionSelect(label, [['', text]], '', () => {}, { disabled: true });
+function levelOptions(max) {
+  return [[0, '—'], ...Array.from({ length: max }, (_, i) => [i + 1, roman(i + 1)])];
+}
+
+// ---------- confirmation modal ----------
+// Native <dialog> gives focus trapping, Esc to close and a backdrop; resolves true on confirm.
+function confirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false }) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      resolve(ok);
+    };
+    const dialog = h('dialog', { class: 'modal glass', 'aria-labelledby': 'modal-title' },
+      h('form', { onsubmit: (e) => { e.preventDefault(); finish(e.submitter?.value === 'confirm'); } },
+        h('h2', { id: 'modal-title' }, title),
+        h('p', {}, message),
+        h('div', { class: 'modal-actions' },
+          h('button', { value: 'cancel', autofocus: true }, cancelLabel),
+          h('button', { value: 'confirm', class: danger ? 'danger' : 'primary' }, confirmLabel))));
+    // Esc fires "cancel" on the dialog.
+    dialog.addEventListener('cancel', (e) => { e.preventDefault(); finish(false); });
+    // Clicking the backdrop (outside the dialog box) cancels; the dialog's own padding doesn't.
+    dialog.addEventListener('click', (e) => {
+      if (e.target !== dialog) return;
+      const r = dialog.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) finish(false);
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+}
+
+// ---------- collapsible panels ----------
+// Open/closed state per panel survives re-renders and reloads (per-viewer convenience).
+const UI_KEY = 'dpscalc.ui.v1';
+const uiOpen = (() => {
+  try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; }
+})();
+function rememberOpen(key, open) {
+  uiOpen[key] = open;
+  try { localStorage.setItem(UI_KEY, JSON.stringify(uiOpen)); } catch { /* ignore */ }
+}
+// Summaries and counts given as functions are refreshed on every update() without rebuilding
+// the form, so typing in number fields keeps focus.
+const liveUpdaters = new Set();
+function live(fn) {
+  fn();
+  liveUpdaters.add(fn);
+}
+function collapsible(cls, key, title, summary, body, defaultOpen) {
+  const summaryEl = h('span', { class: 'panel-summary' });
+  const setText = (text) => { summaryEl.textContent = text || ''; summaryEl.title = text || ''; };
+  if (typeof summary === 'function') live(() => setText(summary()));
+  else setText(summary);
+  const d = h('details', { class: cls, id: `panel-${key}`, open: uiOpen[key] ?? defaultOpen },
+    h('summary', {},
+      typeof title === 'string' ? h('span', { class: 'panel-title' }, title) : title,
+      summaryEl,
+      h('span', { class: 'chev' })),
+    h('div', { class: cls.includes('sub') ? 'sub-body' : 'panel-body' }, body));
+  d.addEventListener('toggle', () => rememberOpen(key, d.open));
+  return d;
+}
+// Top-level section card.
+const panel = (key, title, summary, body, defaultOpen = false) =>
+  collapsible('panel glass', key, title, summary, body, defaultOpen);
+// Nested group inside a section.
+const sub = (key, title, summary, body, defaultOpen = false) =>
+  collapsible('sub', key, h('span', {}, title), summary, body, defaultOpen);
+function countBadge(countFn) {
+  const el = h('span', { class: 'count' });
+  live(() => {
+    const n = countFn();
+    el.textContent = String(n);
+    el.className = `count${n ? '' : ' zero'}`;
+  });
+  return el;
+}
+const joinParts = (...parts) => parts.flat().filter(Boolean).join(' · ');
+
+// ---------- item pickers ----------
+// In-game markers: fragged (STARRED_*) items carry ⚚ before the name; dungeon stars are gold ✪,
+// master stars a red numbered badge (drawn in CSS: the ➊–➎ glyphs are unreadable at small sizes).
+const FRAGGED_ICON = '⚚';
+const masterStarBadge = (n) => h('span', { class: 'master-star', title: `${n} master star${n > 1 ? 's' : ''}` }, String(n));
+
+// Non-dungeon stars past 5 (Crimson Isle / Kuudra gear) don't add icons: they recolour the five
+// stars from the left, gold -> pink for stars 6-10, pink -> aqua for stars 11-15.
+const STAR_TIERS = ['star-gold', 'star-pink', 'star-aqua'];
+
+function starIcons(item, stars, dungeonized) {
+  const n = Math.max(0, stars || 0);
+  if (!item || !n) return '';
+  const dungeon = asDungeonItem(item, dungeonized).dungeon_item;
+  const title = `${n} star${n > 1 ? 's' : ''}`;
+  if (dungeon || n <= 5) {
+    return h('span', { class: 'star-icons', title },
+      h('span', { class: 'star-gold' }, '✪'.repeat(Math.min(n, 5))),
+      dungeon && n > 5 ? masterStarBadge(Math.min(n - 5, 5)) : '');
+  }
+  const tier = Math.min(Math.ceil(n / 5) - 1, STAR_TIERS.length - 1); // 1 for 6-10, 2 for 11-15
+  const upgraded = Math.min(n - tier * 5, 5);
+  return h('span', { class: 'star-icons', title },
+    h('span', { class: STAR_TIERS[tier] }, '✪'.repeat(upgraded)),
+    h('span', { class: STAR_TIERS[tier - 1] }, '✪'.repeat(5 - upgraded)));
+}
+
+// Key combat stats for the option list, e.g. "260 Dmg · 150 Str".
+function itemNote(item) {
+  const s = itemStats(item);
+  return ['DAMAGE', 'STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE', 'DEFENSE', 'HEALTH']
+    .filter((k) => s[k]).slice(0, 1).map((k) => `${fmtShort(s[k])} ${STAT_SHORT[k]}`).join('');
+}
+
+function itemPicker(list, slotPath) {
+  const path = `${slotPath}.id`;
+  const piece = getPath(slotPath) || {};
+  const current = byId.get(piece.id);
+  const names = {};
+  for (const i of list) if (!i.id.startsWith('STARRED_')) names[i.name] = (names[i.name] || 0) + 1;
+  const showStat = !slotPath.startsWith('armor.'); // armor lists show names only
+  const options = [
+    { value: '', label: 'None', cls: 'muted', search: 'empty none' },
+    ...list.map((i) => {
+      const fragged = i.id.startsWith('STARRED_');
+      return {
+        value: i.id, label: i.name, cls: `tier tier-${i.tier}`,
+        rich: i.fmtName ? parseFormatting(i.fmtName) : undefined, // in-game § colours/styles
+        prefix: fragged ? FRAGGED_ICON : '', prefixCls: `tier tier-${i.tier}`,
+        // Two different non-fragged items with the same name: a readable form of the id tells them apart.
+        note: !fragged && names[i.name] > 1 ? titleCase(i.id) : showStat ? itemNote(i) : '',
+        search: `${i.id} ${fragged ? 'fragged' : ''}`,
+      };
+    }),
+  ];
+  // The selected item shows in its effective rarity (recomb, quality, milestone).
+  if (current) {
+    const idx = options.findIndex((o) => o.value === current.id);
+    const canRecomb = current.can_recombobulate !== false && recombHasEffect(current, piece.level);
+    const tier = recombHasEffect(current, piece.level)
+      ? RARITIES[rarityIndex(current, canRecomb && piece.recomb, piece.level, piece.quality)]
+      : baseTier(current, piece.level);
+    options[idx] = { ...options[idx], cls: `tier tier-${tier}`, prefixCls: `tier tier-${tier}` };
+  }
+  const input = combo(options, current?.id ?? '', (id) => {
+    setPath(path, id);
+    // Gem slots, star count and tiers differ per item.
+    setPath(`${slotPath}.gems`, []);
+    setPath(`${slotPath}.stars`, 0);
+    setPath(`${slotPath}.level`, undefined);
+    setPath(`${slotPath}.statTier`, undefined);
+    setPath(`${slotPath}.price`, undefined);
+    setPath(`${slotPath}.quality`, undefined);
+    setPath(`${slotPath}.dungeonized`, false);
+    rerenderForm();
+  }, { searchable: true, placeholder: 'Search item…', ariaLabel: 'Item', className: 'mc' });
+  const info = h('div', { class: 'item-stats' });
+  showItemInfo(info, current, { tier: piece.statTier, level: piece.level });
+  return { input, dl: '', info };
+}
+// Unstarred base stats at the selected stat tier / milestone.
+function showItemInfo(el, item, opts = {}) {
+  el.replaceChildren();
+  if (!item) return;
+  const stats = itemStats(item, opts);
+  const tier = baseTier(item, opts.level) || '';
+  el.append(
+    h('span', { class: `tier tier-${tier}` }, tier.replace('_', ' ')), ' ',
+    item.category ? `${item.category.toLowerCase()} · ` : '',
+    Object.entries(stats).map(([k, v]) => `${STAT_LABELS[k] || k.toLowerCase().replace(/_/g, ' ')} ${v > 0 ? '+' : ''}${fmt(v, 2)}`).join(', ') || 'no stats',
+  );
+}
+// Potato books, Art of War and "Bought for" price, depending on the slot.
+function anvilControls(kind, path) {
+  const item = byId.get(getPath(`${path}.id`));
+  const perBook = POTATO_STATS[kind];
+  if (!item || !perBook) return '';
+  const hpb = getPath(`${path}.hpb`) || 0;
+  const bookOpts = (max, offset) => Array.from({ length: max + 1 }, (_, n) =>
+    (n ? { value: n, label: `${n} book${n === 1 ? '' : 's'}`, note: statText(Object.fromEntries(Object.entries(perBook).map(([k, v]) => [k, v * (n + offset)]))) } : [n, 'None']));
+  const price = PRICE_ITEMS[item.id];
+  const greed = price ? greedBonus(item.id, getPath(`${path}.price`)) : 0;
+  return h('div', { class: 'anvil' },
+    selectField('Hot Potato Books', `${path}.hpb`, bookOpts(HOT_POTATO_MAX, 0), { num: true, rerender: true }),
+    hpb >= HOT_POTATO_MAX
+      ? selectField('Fuming Potato Books', `${path}.fuming`, bookOpts(FUMING_POTATO_MAX, HOT_POTATO_MAX), { num: true })
+      : disabledSelect('Fuming Potato Books', 'Needs 10 Hot Potato Books'),
+    kind === 'weapon' ? h('label', { class: 'check' },
+      h('input', { type: 'checkbox', checked: !!getPath(`${path}.artOfWar`), 'data-path': `${path}.artOfWar` }),
+      `The Art of War (${statText(ART_OF_WAR)})`) : '',
+    price ? h('label', { class: 'field' }, `Bought for (coins, max ${fmt(price.cap)})`,
+      h('input', { type: 'number', min: 0, step: 100000, value: getPath(`${path}.price`) ?? '', placeholder: '0',
+        'data-path': `${path}.price`, 'data-num': '1', 'data-rerender': '1' }),
+      h('span', { class: 'muted' }, `Greed: +${greed} Damage, +${greed} Strength`)) : '',
+  );
+}
+
+const STAT_SHORT = { STRENGTH: 'Str', CRITICAL_DAMAGE: 'Crit Dmg', CRITICAL_CHANCE: 'Crit Chance', DAMAGE: 'Dmg',
+  INTELLIGENCE: 'Int', HEALTH: 'Health', DEFENSE: 'Def', TRUE_DEFENSE: 'True Def' };
+const statText = (stats) => Object.entries(stats).filter(([, v]) => v)
+  .map(([k, v]) => `${v > 0 ? '+' : ''}${fmt(v, 2)} ${STAT_SHORT[k] || k}`).join(', ');
+
+function reforgeOptions(table, rIdx) {
+  return [['none', 'None'], ...Object.entries(table).map(([k, r]) => {
+    const stats = Object.fromEntries(Object.entries(r.stats).map(([s, arr]) => [s, arr[Math.min(rIdx, arr.length - 1)]]));
+    const txt = statText(stats);
+    return { value: k, label: r.name, note: txt, search: r.stone || '' };
+  })];
+}
+
+// Reforge, recomb and gemstone controls shared by weapon / armor / equipment slots.
+function upgradeControls(kind, path) {
+  const item = byId.get(getPath(`${path}.id`));
+  if (!item) return null;
+  const tierCtl = tierControl(path);
+  const canRecomb = item.can_recombobulate !== false;
+  const level = getPath(`${path}.level`);
+  const rIdx = rarityIndex(item, canRecomb && getPath(`${path}.recomb`), level, getPath(`${path}.quality`));
+  // Divine and above: show the item's own rarity (Special etc. aren't in RARITIES) and no recomb gain.
+  const topTier = !recombHasEffect(item, level);
+  const tierName = topTier ? (baseTier(item, level) || '') : RARITIES[rIdx];
+  const tierLabel = h('span', { class: `tier tier-${tierName}` }, titleCase(tierName || 'COMMON'));
+  const table = reforgeTable(kind, item);
+  const gemSlots = item.gem_slots || [];
+  const gems = getPath(`${path}.gems`) || [];
+  return h('div', { style: 'margin-top:6px' },
+    h('div', { class: 'upgrades' },
+      kind !== 'equipment'
+        ? selectField('Reforge', `${path}.reforge`, reforgeOptions(table, rIdx))
+        : tierCtl,
+      !canRecomb
+        ? h('span', {}, tierLabel, h('span', { class: 'muted' }, " · can't be recombobulated"))
+        : topTier
+          ? h('label', { class: 'check', title: 'Recombobulating Divine or Special-and-above items gives no extra stats' },
+            h('input', { type: 'checkbox', disabled: true }),
+            h('span', { class: 'muted' }, 'Recombobulated'), ' → ', tierLabel)
+          : h('label', { class: 'check' },
+            h('input', { type: 'checkbox', checked: !!getPath(`${path}.recomb`), 'data-path': `${path}.recomb`, 'data-rerender': '1' }),
+            'Recombobulated', ' → ', tierLabel),
+      kind !== 'equipment' && tierCtl ? tierCtl : '',
+      item.can_dungeonize ? h('label', { class: 'check', title: 'Converted into a Dungeon Item with essence' },
+        h('input', { type: 'checkbox', checked: !!getPath(`${path}.dungeonized`), 'data-path': `${path}.dungeonized`, 'data-rerender': '1' }),
+        'Dungeonized') : ''),
+    gemSlots.length ? h('div', { class: 'gems' }, gemSlots.map((type, i) => {
+      const accepts = SLOT_ACCEPTS[type];
+      const cur = gems[i];
+      const label = `${type[0]}${type.slice(1).toLowerCase()} slot`;
+      if (!accepts) return disabledSelect(label, 'Not combat-relevant');
+      // Grouped by gem, coloured like the gemstone.
+      const opts = [{ value: '', label: 'Empty', cls: 'muted' }, ...accepts.flatMap((g) => GEM_QUALITIES.slice().reverse().map((q) => ({
+        value: `${g}:${q}`, group: GEMS[g].name, cls: `gem gem-${g}`,
+        label: `${q[0]}${q.slice(1).toLowerCase()} ${GEMS[g].name}`,
+        note: statText({ [GEMS[g].stat]: gemValue(g, q, rIdx) }),
+      })))];
+      const value = cur ? `${cur.gem}:${cur.quality}` : '';
+      return actionSelect(label, opts, value, (v) => {
+        const [gem, quality] = v.split(':');
+        const list = [...(getPath(`${path}.gems`) || [])];
+        list[i] = gem ? { gem, quality } : null;
+        setPath(`${path}.gems`, list);
+        update();
+      }, { searchable: false });
+    })) : null,
+  );
+}
+
+// Star dropdown sized to the item's upgrade count; labels show the stat boost at the chosen location.
+function starsField(path) {
+  const item = asDungeonItem(byId.get(getPath(`${path}.id`)), getPath(`${path}.dungeonized`));
+  const max = maxStars(item);
+  if (!max) return h('span');
+  if ((getPath(`${path}.stars`) || 0) > max) setPath(`${path}.stars`, max); // e.g. after un-dungeonizing
+  // Each option shows the in-game star icons and the stat bonus at the current location.
+  const opts = Array.from({ length: max + 1 }, (_, n) => {
+    const pct = Math.round((starMultiplier(item, n, state.dungeonMode) - 1) * 100);
+    return {
+      value: n, label: `${n} star${n === 1 ? '' : 's'}`, search: String(n),
+      node: () => (n
+        ? h('span', { class: 'star-option' }, starIcons(item, n, false), h('span', { class: 'star-bonus' }, `+${pct}%`))
+        : h('span', { class: 'muted' }, 'No stars')),
+    };
+  });
+  return selectField('Stars', `${path}.stars`, opts, { num: true, searchable: false });
+}
+
+// Milestone (David's Cloak) or stat tier (API tiered_stats) picker.
+function tierControl(path) {
+  const item = byId.get(getPath(`${path}.id`));
+  if (!item) return '';
+  const prog = PROGRESSION_ITEMS[item.id];
+  if (prog) {
+    const opts = Array.from({ length: prog.max + 1 }, (_, n) => ({ value: n, label: prog.names[n] || 'None', note: titleCase(prog.tierAt(n)) }));
+    if (getPath(`${path}.level`) == null) setPath(`${path}.level`, prog.max);
+    return selectField(prog.label, `${path}.level`, opts, { num: true, rerender: true });
+  }
+  const tiers = statTierCount(item);
+  if (!tiers) return '';
+  if (!getPath(`${path}.statTier`)) setPath(`${path}.statTier`, tiers);
+  if (!isDungeonDrop(item, tiers)) {
+    const opts = Array.from({ length: tiers }, (_, i) => [i + 1, `Tier ${i + 1}${i + 1 === tiers ? ' (best)' : ''}`]);
+    return selectField('Stat tier', `${path}.statTier`, opts, { num: true, rerender: true });
+  }
+  // Dungeon drop: floor it dropped from + quality roll.
+  const floorOpts = Array.from({ length: tiers }, (_, i) => ({ value: i + 1, label: floorLabel(i + 1), search: `tier ${i + 1}` }));
+  return [
+    selectField('Dropped floor', `${path}.statTier`, floorOpts, { num: true, rerender: true }),
+    h('label', { class: 'field', title: `${QUALITY_MAX}% quality = +1 rarity` }, `Quality (0–${QUALITY_MAX}%)`,
+      h('input', { type: 'number', min: 0, max: QUALITY_MAX, step: 1, value: getPath(`${path}.quality`) ?? '', placeholder: '0',
+        'data-path': `${path}.quality`, 'data-num': '1', 'data-rerender': '1' })),
+  ];
+}
+
+// One-line description of a slot's upgrades, shown on the collapsed "Upgrades" row.
+function upgradeSummary(kind, path) {
+  const item = byId.get(getPath(`${path}.id`));
+  if (!item) return '';
+  const p = getPath(path) || {};
+  const ref = reforgeTable(kind, item)[p.reforge];
+  const prog = PROGRESSION_ITEMS[item.id];
+  const gems = (p.gems || []).filter(Boolean).length;
+  const books = (p.hpb || 0) + ((p.hpb || 0) >= HOT_POTATO_MAX ? (p.fuming || 0) : 0);
+  return joinParts(
+    ref?.name,
+    p.recomb && recombHasEffect(item, p.level) ? 'recomb' : '',
+    p.dungeonized ? 'dungeonized' : '',
+    prog ? `${prog.label} ${prog.names[p.level ?? prog.max] || 0}` : '',
+    p.statTier && statTierCount(item) ? (isDungeonDrop(item, statTierCount(item)) ? floorLabel(p.statTier).split(' / ')[0] : `tier ${p.statTier}`) : '',
+    p.quality ? `${p.quality}% quality` : '',
+    item.gem_slots?.length ? `${gems}/${item.gem_slots.length} gems` : '',
+    books ? `${books} books` : '',
+    p.artOfWar ? 'Art of War' : '',
+    PRICE_ITEMS[item.id] && p.price ? `bought ${fmt(p.price)}` : '',
+  ) || 'none';
+}
+
+function slotBlock(kind, path, list, title, dlId, openUpgrades = false) {
+  const p = itemPicker(list, path);
+  const item = byId.get(getPath(`${path}.id`));
+  return h('div', { class: 'slot' },
+    h('div', { class: 'slot-head' }, h('span', { class: 'name' }, title), p.input, starsField(path)),
+    p.dl, p.info,
+    item ? sub(`${path}-upgrades`, 'Upgrades', () => upgradeSummary(kind, path),
+      [upgradeControls(kind, path), anvilControls(kind, path)], openUpgrades) : '');
+}
+
+// Fill every combat-relevant gem slot on all gear with the given quality.
+function fillAllGems(quality) {
+  const paths = ['weapon', ...ARMOR_SLOTS.map((s) => `armor.${s}`), ...EQUIP_SLOTS.map((s) => `equipment.${s.key}`)];
+  for (const path of paths) {
+    const item = byId.get(getPath(`${path}.id`));
+    if (!item) continue;
+    setPath(`${path}.gems`, (item.gem_slots || []).map((type) => {
+      if (!quality) return null;
+      const gem = GEM_FILL_PRIORITY.find((g) => SLOT_ACCEPTS[type]?.includes(g));
+      return gem ? { gem, quality } : null;
+    }));
+  }
+  rerenderForm();
+}
+
+// ---------- form sections ----------
+function weaponSection() {
+  const weapon = byId.get(state.weapon.id);
+  const bow = isBow(weapon);
+  const enchants = ENCHANTS.filter((e) => !(e.bow && !bow) && !(e.melee && bow && !e.stat));
+  const ults = ultimatesFor(weapon, bow);
+  const ult = ults.find((u) => u.id === state.weapon.ultimate?.id);
+  const oneForAll = !!ult?.exclusive;
+
+  // Ultimate enchants are shown in-game in bold pink; one option per level, grouped by enchant.
+  const ultOpts = [{ value: '', label: 'None', cls: 'muted' }, ...ults.flatMap((u) => u.values.map((_, i) => ({
+    value: `${u.id}:${i + 1}`, group: u.name, label: `${u.name} ${roman(i + 1)}`, cls: 'ench-ultimate',
+    note: u.effect ? '' : 'no single-hit effect',
+  })))];
+  const ultSelect = actionSelect(null, ultOpts, ult ? `${ult.id}:${state.weapon.ultimate.level}` : '', (v) => {
+    const [id, level] = v.split(':');
+    state.weapon.ultimate = id ? { id, level: Number(level) } : null;
+    rerenderForm();
+  }, { ariaLabel: 'Ultimate enchantment' });
+
+  // Situational inputs only some ultimates need.
+  const ultInputs = {
+    perEnemy: () => numField('Enemies within 10 blocks', 'target.nearbyEnemies', { min: 0, max: 10, step: 1 }),
+    perKill: () => numField('Kills in the combo window', 'player.comboKills', { min: 0, step: 1 }),
+    soulEater: () => numField("Last killed mob's damage", 'player.soulEaterMobDamage', { min: 0 }),
+  }[ult?.effect];
+
+  const bonusText = weaponMultipliers(weapon?.id).map((r) => {
+    const against = (r.mobs || r.families).join('/');
+    return r.perMissingHp ? `up to ×${1 + r.perMissingHp} vs ${against} (scales with missing HP)` : `×${r.mult} vs ${against}`;
+  }).join(', ');
+
+  const enchantField = (e) => {
+    const clash = enchantConflict(e.id, state.weapon.enchants);
+    const blockedBy = clash && !state.weapon.enchants[e.id] ? ENCHANTS.find((x) => x.id === clash).name : null;
+    // Conflicting enchants re-render so their partner gets blocked/unblocked.
+    const sel = selectField(null, `weapon.enchants.${e.id}`, levelOptions(e.values.length),
+      { num: true, rerender: ENCHANT_CONFLICTS.flat().includes(e.id), disabled: oneForAll || !!blockedBy });
+    return h('div', { class: 'field', title: blockedBy ? `Can't be combined with ${blockedBy}` : '' },
+      h('span', { class: 'field-label' }, e.name, blockedBy ? h('span', { class: 'conflict' }, ` ✕ ${blockedBy}`) : ''), sel);
+  };
+  const active = (list) => list.filter((e) => state.weapon.enchants[e.id]);
+  const activeText = (list) => active(list).map((e) => `${e.name} ${roman(state.weapon.enchants[e.id])}`).join(', ');
+  const general = enchants.filter((e) => !e.mobs);
+  const mobSpecific = enchants.filter((e) => e.mobs);
+  const enchantGroup = (key, title, list) => sub(`weapon-${key}`, [title, ' ', countBadge(() => (oneForAll ? 0 : active(list).length))],
+    () => (oneForAll ? 'removed by One For All' : activeText(list) || 'none'),
+    h('div', { class: `grid${oneForAll ? ' disabled' : ''}` }, list.map(enchantField)),
+    !oneForAll && active(list).length > 0);
+
+  const summary = () => (weapon
+    ? joinParts(weapon.name, state.weapon.stars ? `${state.weapon.stars}✪` : '',
+      ult ? `${ult.name} ${roman(state.weapon.ultimate.level)}` : '',
+      oneForAll ? '' : `${active(enchants).length} enchants`)
+    : 'No weapon selected');
+
+  return panel('weapon', 'Weapon', summary, [
+    slotBlock('weapon', 'weapon', items.weapons, 'Item', null, true),
+    bonusText ? h('p', { class: 'weapon-bonus' }, `Weapon bonus: ${bonusText}`) : '',
+    h('h3', {}, 'Enchantments'),
+    h('div', { class: 'grid wide' },
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Ultimate enchantment'), ultSelect),
+      ultInputs ? ultInputs() : ''),
+    enchantGroup('general', 'General', general),
+    mobSpecific.length ? enchantGroup('mobench', 'Vs. specific enemies', mobSpecific) : '',
+  ], true);
+}
+
+function armorSection() {
+  // Action dropdowns: pick an option to apply it; they don't keep a selection.
+  const allReforge = actionSelect('Reforge all armor',
+    [['none', 'None'], ...Object.entries(ARMOR_REFORGES).map(([k, r]) => [k, r.name])], '', (v) => {
+      for (const s of ARMOR_SLOTS) state.armor[s].reforge = v;
+      rerenderForm();
+    }, { placeholder: 'Choose…', searchable: false });
+  const allRecomb = h('button', { type: 'button', onclick: () => {
+    const on = !ARMOR_SLOTS.every((s) => state.armor[s].recomb);
+    for (const s of ARMOR_SLOTS) state.armor[s].recomb = on;
+    rerenderForm();
+  } }, 'Toggle recomb on all');
+  const fillGems = actionSelect('Fill all gem slots (all gear)', [
+    ...GEM_QUALITIES.slice().reverse().map((q) => [q, `${q[0]}${q.slice(1).toLowerCase()}`]),
+    { value: 'CLEAR', label: 'Clear all gems', cls: 'muted' },
+  ], '', (v) => fillAllGems(v === 'CLEAR' ? '' : v), { placeholder: 'Choose…', searchable: false });
+  const summary = () => {
+    const worn = ARMOR_SLOTS.map((s) => byId.get(state.armor[s].id)).filter(Boolean);
+    const reforges = [...new Set(ARMOR_SLOTS.map((s) => ARMOR_REFORGES[state.armor[s].reforge]?.name).filter(Boolean))];
+    return worn.length
+      ? joinParts(`${worn.length}/4 pieces`, commonName(worn.map((i) => i.name)), reforges.join('/'))
+      : 'No armor';
+  };
+  return panel('armor', 'Armor', summary, [
+    h('div', { class: 'presets' }, allReforge, fillGems, allRecomb),
+    setBonusPanel('armor'),
+    ARMOR_SLOTS.map((slot) =>
+      slotBlock('armor', `armor.${slot}`, items.armor[slot], slot[0] + slot.slice(1).toLowerCase(), `dl-${slot}`)),
+  ]);
+}
+
+// Shared leading words of item names ("Necron's Helmet", "Necron's Boots" -> "Necron's").
+function commonName(names) {
+  if (names.length < 2) return names[0] || '';
+  const words = names.map((n) => n.split(' '));
+  const out = [];
+  for (let i = 0; words.every((w) => w[i] && w[i] === words[0][i]); i++) out.push(words[0][i]);
+  return out.length ? `${out.join(' ')} set` : '';
+}
+
+// Set / piece bonuses for one slot group ('armor' | 'equipment'): live status plus situational inputs.
+function setBonusPanel(slot) {
+  const pieces = slot === 'armor'
+    ? ARMOR_SLOTS.map((s) => ({ slot, id: state.armor[s].id }))
+    : EQUIP_SLOTS.map((s) => ({ slot, id: state.equipment[s.key].id }));
+  const detected = detectSets(pieces);
+  const evaluate = () => {
+    const weapon = byId.get(state.weapon.id);
+    return evaluateSets(detected, {
+      bow: isBow(weapon), target: { mobs: [], families: [], ...state.target }, weaponId: weapon?.id,
+      cataLevel: clampCatacombs(state.catacombsLevel),
+      inDungeon: state.dungeonMode === 'catacombs' || state.dungeonMode === 'master',
+    }, state.setInputs).status;
+  };
+  const title = slot === 'armor' ? 'Set bonuses' : 'Piece bonuses';
+  if (!detected.length) return ''; // shown once a set piece is worn
+
+  // Status lines refresh on every update (e.g. stack counts, in-dungeon switch).
+  const list = h('div', { class: 'set-list' });
+  live(() => list.replaceChildren(...evaluate().map((s) => h('div', { class: `set-row${s.active ? ' on' : ''}` },
+    h('div', { class: 'set-head' },
+      h('span', { class: 'set-name' }, s.label),
+      h('span', { class: `tag${s.active ? ' on' : ''}` }, s.active ? 'active' : 'inactive')),
+    h('div', { class: 'set-text' }, s.text)))));
+
+  // Situational inputs, only for sets that have enough pieces to matter.
+  const inputs = detected.filter((d) => d.set.inputs && (d.count >= d.set.min || d.helmet)).flatMap((d) => d.set.inputs.map((inp) => {
+    const path = `setInputs.${d.set.id}.${inp.key}`;
+    if (inp.type === 'toggle') {
+      return h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px' },
+        h('input', { type: 'checkbox', checked: !!(getPath(path) ?? inp.def), 'data-path': path }), inp.label);
+    }
+    return numField(inp.label, path, { min: inp.min, max: inp.max, step: 1, placeholder: String(inp.def ?? 0) });
+  }));
+
+  return sub(`${slot}-sets`, [title, ' ', countBadge(() => evaluate().filter((s) => s.active).length)],
+    () => evaluate().map((s) => `${s.set.name} ${s.count}/${s.set.full}`).join(', '),
+    [list, inputs.length ? h('div', { class: 'grid wide', style: 'margin-top:10px' }, inputs) : ''], true);
+}
+
+function equipmentSection() {
+  const summary = () => {
+    const worn = EQUIP_SLOTS.map((s) => byId.get(state.equipment[s.key].id)).filter(Boolean);
+    return worn.length ? worn.map((i) => i.name).join(', ') : 'No equipment';
+  };
+  return panel('equipment', 'Equipment', summary, [
+    setBonusPanel('equipment'),
+    EQUIP_SLOTS.map((slot) => {
+      const list = slot.cats.flatMap((c) => items.equipment[c] || []).sort((a, b) => a.name.localeCompare(b.name));
+      return slotBlock('equipment', `equipment.${slot.key}`, list, slot.name, `dl-${slot.key}`);
+    })]);
+}
+
+function accessorySection() {
+  const powerOpts = POWERS.map((p) => {
+    const stone = p.stone ? items.powerStones[p.stone] || p.stone : p.id === 'none' ? '' : 'starter';
+    return { value: p.id, label: p.name, note: stone, search: stone };
+  });
+  const tuningInfo = h('span', { class: 'muted', id: 'tuning-info' });
+  const summary = () => {
+    const mp = state.magicalPower || 0;
+    const power = POWERS.find((p) => p.id === state.power);
+    const used = Object.values(state.tuning).reduce((a, b) => a + (b || 0), 0);
+    return joinParts(`${fmt(mp)} MP`, power && power.id !== 'none' ? power.name : 'no power',
+      used ? `${used}/${tuningPoints(mp)} tuning` : '');
+  };
+  return panel('accessories', 'Accessories & Power', summary, [
+    h('div', { class: 'grid wide' },
+      numField('Magical Power', 'magicalPower', { min: 0, step: 1 }),
+      selectField('Power', 'power', powerOpts),
+      h('div', { class: 'field muted', id: 'power-mult', style: 'align-self:end;padding-bottom:8px' })),
+    h('h3', {}, 'Tuning — ', tuningInfo),
+    h('div', { class: 'grid' },
+      Object.entries(TUNING_PER_POINT).map(([stat, per]) =>
+        numField(`${STAT_LABELS[stat]} (+${per}/pt)`, `tuning.${stat}`, { min: 0, step: 1 }))),
+  ]);
+}
+
+function shardSection() {
+  const shardOpts = levelOptions(10);
+  const echoes = [
+    { id: 'echo_ruler', name: 'Echo of Ruler', shard: 'Caiman' },
+    { id: 'echo_echoes', name: 'Echo of Echoes', shard: 'Tiamat' },
+  ];
+  const active = (list) => list.filter((s) => state.shards[s.id]);
+  const activeText = (list) => active(list).map((s) => `${s.name} ${roman(state.shards[s.id])}`).join(', ');
+  const group = (key, title, list) => sub(`shards-${key}`, [title, ' ', countBadge(() => active(list).length)], () => activeText(list) || 'none',
+    h('div', { class: 'grid wide' },
+      list.map((s) => h('label', { class: 'field', title: `${s.shard} Shard` }, `${s.name} · ${s.shard}`,
+        selectField(null, `shards.${s.id}`, shardOpts, { num: true })))),
+    active(list).length > 0);
+  const all = [...SHARDS, ...echoes];
+  return panel('shards', 'Shards (Attributes)', () => activeText(all) || 'None', [
+    group('damage', 'Damage & stats', SHARDS.filter((s) => !s.ruler)),
+    group('ruler', 'Ruler attributes', SHARDS.filter((s) => s.ruler)),
+    group('echoes', 'Echoes', echoes),
+  ]);
+}
+
+// ---------- pets ----------
+const titleCase = (id) => id.toLowerCase().split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+const petName = (id) => pets?.displayNames?.[id] || titleCase(id);
+const petRarities = (id) => PET_RARITIES.filter((r) => pets?.petnums?.[id]?.[r]);
+
+// Pet as the calculator needs it: rarity after Tier Boost, interpolated numbers, cleaned lore.
+function resolvedPet() {
+  const { id, rarity, level, item } = state.pet;
+  if (!id || !pets?.petnums?.[id]) return null;
+  const eff = effectiveRarity(pets.petnums, id, rarity, item);
+  const nums = petNumbers(pets.petnums, id, eff, level);
+  if (!nums) return null;
+  const range = petLevelRange(pets.petnums, id, eff);
+  const lore = petLore.get(`${id};${rarityIdx(eff)}`);
+  return {
+    id, name: petName(id), rarity: eff, level: Math.max(range.min, Math.min(range.max, level || range.max)),
+    item, itemName: items.petItems.find((i) => i.id === item)?.name,
+    ...nums, lore: lore ? cleanLore(lore) : '', loreLines: lore,
+  };
+}
+
+function ensurePetLore() {
+  const pet = resolvedPet();
+  if (!pet) return;
+  const key = `${pet.id};${rarityIdx(pet.rarity)}`;
+  if (petLore.has(key)) return;
+  petLore.set(key, null);
+  loadPetLore(pet.id, rarityIdx(pet.rarity)).then((lore) => { petLore.set(key, lore); update(); });
+}
+
+function petItemEffect(id) {
+  const e = PET_ITEMS[id];
+  if (!e) return '';
+  if (e.tierBoost) return '+1 pet rarity';
+  const parts = [];
+  if (e.flat) parts.push(statText(e.flat));
+  for (const [k, v] of Object.entries(e.pct || {})) parts.push(`+${v}% pet ${k === '__all' ? 'stats' : STAT_SHORT[k]}`);
+  return parts.join(', ');
+}
+
+function petSection() {
+  const body = [];
+  const summary = () => {
+    if (!pets || pets.error || !state.pet.id) return pets?.error ? 'Pet data unavailable' : 'No pet';
+    const item = items.petItems.find((i) => i.id === state.pet.item);
+    return joinParts(petName(state.pet.id), `${titleCase(state.pet.rarity)} ${state.pet.level || ''}`.trim(), item?.name);
+  };
+  const card = panel('pet', 'Pet', summary, body);
+  const content = card.querySelector('.panel-body');
+  if (!pets) {
+    content.append(h('p', { class: 'muted' }, 'Loading pet data…'));
+    return card;
+  }
+  if (pets.error) {
+    content.append(h('p', { class: 'muted' }, `Pet data unavailable (${pets.error}). Enter pet stats under Buffs & skills.`));
+    return card;
+  }
+  const ids = Object.keys(pets.petnums).filter((id) => petRarities(id).length);
+  const groups = {};
+  for (const id of ids) (groups[pets.types[id] || 'OTHER'] ??= []).push(id);
+  // The chosen pet shows in its (Tier Boost-adjusted) rarity colour.
+  const shownRarity = resolvedPet()?.rarity || state.pet.rarity;
+  const petOpts = [{ value: '', label: 'No pet', cls: 'muted' },
+    ...Object.keys(groups).sort().flatMap((g) => groups[g].sort((a, b) => petName(a).localeCompare(petName(b))).map((id) => ({
+      value: id, label: petName(id), group: titleCase(g),
+      cls: id === state.pet.id ? `tier tier-${shownRarity}` : '',
+      search: petRarities(id).join(' ').toLowerCase(),
+    })))];
+  const petSelect = actionSelect('Pet', petOpts, state.pet.id, (v) => {
+    state.pet.id = v;
+    const rs = petRarities(state.pet.id);
+    if (rs.length && !rs.includes(state.pet.rarity)) state.pet.rarity = rs[rs.length - 1];
+    state.pet.level = state.pet.id ? petLevelRange(pets.petnums, state.pet.id, state.pet.rarity).max : 100;
+    rerenderForm();
+  }, { searchable: true, placeholder: 'Search pet…', className: 'mc' });
+
+  content.append(h('div', { class: 'grid wide' }, petSelect));
+  if (!state.pet.id || !pets.petnums[state.pet.id]) return card;
+
+  const range = petLevelRange(pets.petnums, state.pet.id, state.pet.rarity);
+  const itemOpts = [{ value: '', label: 'None', cls: 'muted' }, ...items.petItems.map((i) => ({
+    value: i.id, label: i.name, cls: `tier tier-${i.tier || 'COMMON'}`, note: petItemEffect(i.id),
+    rich: i.fmtName ? parseFormatting(i.fmtName) : undefined,
+    search: `${i.tier || ''} ${petItemEffect(i.id)}`,
+  }))];
+  content.append(
+    h('div', { class: 'grid wide', style: 'margin-top:10px' },
+      selectField('Rarity', 'pet.rarity', petRarities(state.pet.id).map((r) => ({ value: r, label: titleCase(r), cls: `tier tier-${r}` })), { rerender: true }),
+      numField(`Level (${range.min}–${range.max})`, 'pet.level', { min: range.min, max: range.max, step: 1 }),
+      selectField('Pet item', 'pet.item', itemOpts, { rerender: true, placeholder: 'Search pet item…', className: 'mc' })),
+    state.pet.id === 'GOLDEN_DRAGON' ? h('div', { class: 'grid', style: 'margin-top:8px' },
+      numField('Bank coins', 'petExtras.bankCoins', { min: 0 }),
+      numField('Magic Find', 'petExtras.magicFind', { min: 0 }),
+      numField('Gold collection digits', 'petExtras.goldDigits', { min: 0, max: 9, step: 1 })) : '',
+    h('div', { id: 'pet-lore', class: 'pet-lore' }),
+  );
+  ensurePetLore();
+  return card;
+}
+
+function renderPetLore(r) {
+  const el = document.getElementById('pet-lore');
+  if (!el) return;
+  const pet = resolvedPet();
+  if (!pet) return el.replaceChildren();
+  if (!pet.loreLines) return el.replaceChildren(h('span', { class: 'muted' }, 'Loading abilities…'));
+  const active = new Map((r.petAbilities || []).map((a) => [a.name, a.active]));
+  const lines = pet.loreLines
+    .map((l) => l.replace(/§./g, '').replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim())
+    .filter((l) => l && !/Right-click|PET$|^\*|Pet, feed|Pet$|Mount$|Morph$/.test(l));
+  // Group wrapped lore lines into stat lines and ability blocks (a short header + its description).
+  const blocks = [];
+  for (const l of lines) {
+    const isStat = /^[A-Za-z ]+: [-+]?\{[A-Z_]+\}/.test(l);
+    const isHeader = !isStat && !/[{}\d%+.,()]/.test(l) && l.split(' ').length <= 4;
+    if (isStat || isHeader || !blocks.length || blocks.at(-1).stat) blocks.push({ head: isHeader ? l : null, stat: isStat, text: isHeader ? '' : l });
+    else blocks.at(-1).text += ` ${l}`;
+  }
+  el.replaceChildren(
+    pet.rarity !== state.pet.rarity ? h('p', { class: 'muted' }, `Tier Boost: counted as ${pet.rarity.toLowerCase()}.`) : '',
+    ...blocks.map((b) => {
+      if (!b.head) return h('div', {}, fillLore(b.text.trim(), pet));
+      const status = active.has(b.head)
+        ? h('span', { class: active.get(b.head) ? 'tag on' : 'tag' }, active.get(b.head) ? 'applied' : 'condition not met')
+        : '';
+      return h('div', { class: 'ability-block' },
+        h('div', { class: 'ability' }, b.head, ' ', status), b.text ? h('div', {}, fillLore(b.text.trim(), pet)) : '');
+    }),
+  );
+}
+
+function bonusSection() {
+  const cols = [['DAMAGE', 'Damage'], ['STRENGTH', 'Str'], ['CRITICAL_DAMAGE', 'CD'], ['CRITICAL_CHANCE', 'CC'],
+    ['additive', 'Add. %'], ['multiplier', 'Mult ×']];
+  const body = h('tbody', {}, state.bonuses.map((b, i) => h('tr', {},
+    h('td', {}, h('input', { value: b.label || '', 'data-path': `bonuses.${i}.label`, style: 'min-width:120px' })),
+    cols.map(([k]) => h('td', {}, h('input', {
+      type: 'number', step: 'any', value: b[k] ?? '', placeholder: k === 'multiplier' ? '1' : '0',
+      'data-path': `bonuses.${i}.${k}`, 'data-num': '1', style: 'min-width:60px',
+    }))),
+    h('td', {}, h('button', { type: 'button', class: 'link', title: 'Remove', onclick: () => {
+      state.bonuses.splice(i, 1); rerenderForm();
+    } }, '✕')),
+  )));
+  const usedRows = () => state.bonuses.filter((b) => ['DAMAGE', 'STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE', 'additive']
+    .some((k) => b[k]) || (b.multiplier && b.multiplier !== 1));
+  const summary = () => joinParts(
+    `Combat ${state.combatLevel || 0}`, `Catacombs ${clampCatacombs(state.catacombsLevel)}`,
+    state.godPotion ? 'God Potion' : '', usedRows().length ? `${usedRows().length} custom bonus${usedRows().length > 1 ? 'es' : ''}` : '');
+  return panel('buffs', 'Buffs & skills', summary, [
+    h('div', { class: 'grid' },
+      numField('Combat level', 'combatLevel', { min: 0, max: 60, step: 1 }),
+      numField(`Catacombs level (0–${CATACOMBS_MAX_LEVEL})`, 'catacombsLevel', { min: 0, max: CATACOMBS_MAX_LEVEL, step: 1, rerender: true }),
+      h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px', title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' },
+        h('input', { type: 'checkbox', checked: !!state.godPotion, 'data-path': 'godPotion', 'data-rerender': '1' }),
+        'God Potion active')),
+    sub('buffs-custom', ['Custom bonuses ', countBadge(() => usedRows().length)],
+      'Pets effects, potions, accessories, abilities…', [
+        h('div', { class: 'table-scroll' }, h('table', { class: 'rows' },
+          h('thead', {}, h('tr', {}, h('th', {}, 'Source'), cols.map(([, t]) => h('th', {}, t)), h('th'))),
+          body)),
+        h('button', { type: 'button', style: 'margin-top:10px', onclick: () => {
+          state.bonuses.push({ label: 'New source' }); rerenderForm();
+        } }, '+ Add source'),
+      ], usedRows().length > 0),
+  ]);
+}
+
+function chooseEnemy(name) {
+  const e = ENEMIES.find((x) => x.name === name);
+  state.target.enemy = e ? name : '';
+  if (e) {
+    Object.assign(state.target, {
+      mobs: [...e.mobs], families: [...e.families], boss: e.boss, maxHp: e.maxHp || undefined, defense: e.defense, hpPct: 100,
+    });
+  }
+  rerenderForm();
+}
+
+// The chosen enemy decides where the fight happens; only custom targets are free.
+// Regular dungeon mobs/minibosses ('either') keep the user's Catacombs/Master Mode choice.
+function syncDungeonMode() {
+  state.dungeonMode = enemyDungeonMode(ENEMIES.find((x) => x.name === state.target.enemy), state.dungeonMode);
+}
+
+// In-dungeon switch: drives star bonuses, the Catacombs-level boost and class passives.
+function dungeonControls() {
+  const inDungeon = state.dungeonMode === 'catacombs' || state.dungeonMode === 'master';
+  const set = (mode) => { state.dungeonMode = mode; rerenderForm(); };
+  const cata = clampCatacombs(state.catacombsLevel);
+  const e = ENEMIES.find((x) => x.name === state.target.enemy);
+  const lock = e ? (e.dungeon || 'outside') : null; // null = custom target, user decides
+
+  let controls;
+  if (!lock) {
+    controls = [
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: inDungeon, onchange: (ev) => set(ev.target.checked ? 'catacombs' : 'none') }),
+        h('strong', {}, 'In dungeon')),
+      inDungeon ? h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: state.dungeonMode === 'master', onchange: (ev) => set(ev.target.checked ? 'master' : 'catacombs') }),
+        'Master Mode') : '',
+    ];
+  } else if (lock === 'either') {
+    // Regular dungeon mob: always in a dungeon, user picks the mode.
+    controls = [
+      h('span', { class: 'badge dungeon' }, 'In dungeon'),
+      h('div', { class: 'segmented' },
+        [['catacombs', 'Catacombs'], ['master', 'Master Mode']].map(([mode, label]) => h('label', {},
+          h('input', { type: 'radio', name: 'dungeon-mode', checked: state.dungeonMode === mode, onchange: () => set(mode) }), label))),
+    ];
+  } else {
+    const text = { outside: 'Outside dungeons', floor: 'In dungeon — Catacombs', master: 'In dungeon — Master Mode' }[lock];
+    controls = [
+      h('span', { class: `badge${lock === 'outside' ? '' : ' dungeon'}${lock === 'master' ? ' master' : ''}` }, text),
+      h('span', { class: 'muted' }, `set by ${e.name}`)];
+  }
+
+  return h('div', { class: 'location' },
+    ...controls,
+    inDungeon ? h('span', { class: 'hint' }, `Dungeon items +${catacombsBoost(cata)}% (Catacombs ${cata})`) : '',
+    inDungeon ? classControls() : '');
+}
+
+// Selected dungeon class + level; its damage passive only counts in dungeons.
+function classControls() {
+  const cls = DUNGEON_CLASSES.find((c) => c.id === state.dungeonClass.id);
+  const bow = isBow(byId.get(state.weapon.id));
+  const pct = cls ? classDamageBonus(cls.id, state.dungeonClass.level, bow, state.dungeonClass.solo) : 0;
+  const effect = !cls ? ''
+    : pct ? `${cls.name}: +${fmt(pct, 2)}% ${bow ? 'arrow' : 'melee'} damage (multiplicative)`
+      : `${cls.name} has no ${bow ? 'bow' : 'melee'} damage passive`
+        + (cls.melee || cls.bow ? ` — its bonus is for ${cls.melee ? 'melee' : 'bows'}` : '');
+  return h('div', { class: 'grid wide class-row' },
+    selectField('Selected dungeon class', 'dungeonClass.id',
+      [['', 'None'], ...DUNGEON_CLASSES.map((c) => [c.id, c.name])], { rerender: true }),
+    cls ? numField(`Class level (0–${CLASS_MAX_LEVEL})`, 'dungeonClass.level',
+      { min: 0, max: CLASS_MAX_LEVEL, step: 1, rerender: true }) : '',
+    cls ? h('label', { class: 'check', style: 'align-self:end', title: 'Class passives are doubled when no one else picked this class' },
+      h('input', { type: 'checkbox', checked: !!state.dungeonClass.solo, 'data-path': 'dungeonClass.solo', 'data-rerender': '1' }),
+      'No dupes') : '',
+    effect ? h('p', { class: 'hint', style: 'grid-column:1/-1;margin:0' }, effect) : '');
+}
+
+// Toggle chips for a list field on the target (mob types / creature families).
+function targetChips(field, options) {
+  return h('div', { class: 'mobs' }, options.map((m) => h('label', {},
+    h('input', { type: 'checkbox', checked: (state.target[field] || []).includes(m), onchange: (e) => {
+      const cur = state.target[field] || [];
+      state.target[field] = e.target.checked ? [...cur, m] : cur.filter((x) => x !== m);
+      state.target.enemy = '';
+      rerenderForm();
+    } }), m)));
+}
+
+function targetSection() {
+  const groups = [...new Set(ENEMIES.map((e) => e.group))];
+  const enemyOpts = [{ value: '', label: 'Custom target', cls: 'muted' },
+    ...groups.flatMap((g) => ENEMIES.filter((e) => e.group === g).map((e) => ({
+      value: e.name, label: e.name, group: g, cls: e.boss ? 'enemy-boss' : '',
+      note: e.maxHp ? `${fmtShort(e.maxHp)} HP` : '',
+      search: `${g} ${e.mobs.join(' ')} ${e.families.join(' ')}`,
+    })))];
+  const enemySelect = actionSelect(null, enemyOpts, state.target.enemy, chooseEnemy,
+    { searchable: true, placeholder: 'Search enemy, area or mob type…', ariaLabel: 'Enemy' });
+  const chosen = ENEMIES.find((e) => e.name === state.target.enemy);
+  const desc = chosen ? joinParts(chosen.mobs.join(', '), chosen.boss ? 'boss' : '',
+    chosen.maxHp ? `${fmt(chosen.maxHp)} HP` : chosen.hpRange ? `${chosen.hpRange} HP` : '',
+    chosen.defense ? `${fmt(chosen.defense)} defense` : '') : '';
+  const summary = () => {
+    const cls = DUNGEON_CLASSES.find((c) => c.id === state.dungeonClass.id);
+    const loc = { none: 'outside dungeons', catacombs: 'Catacombs', master: 'Master Mode' }[state.dungeonMode] || '';
+    return joinParts(state.target.enemy || 'Custom target', loc,
+      cls && state.dungeonMode !== 'none' ? `${cls.name} ${state.dungeonClass.level ?? 0}` : '');
+  };
+  const typeCount = () => (state.target.mobs || []).length + (state.target.families || []).length;
+  return panel('target', 'Target & fight', summary, [
+    h('div', { class: 'grid wide' }, h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Enemy'), enemySelect)),
+    desc ? h('p', { class: 'item-stats', style: 'margin:6px 0 14px' }, desc) : '',
+    dungeonControls(),
+    h('div', { class: 'grid' },
+      numField('Target HP %', 'target.hpPct', { min: 0, max: 100 }),
+      numField('Target max HP', 'target.maxHp', { min: 0 }),
+      numField('Target defense', 'target.defense', { min: 0 }),
+      numField('Your max HP', 'player.maxHp', { min: 0 }),
+      h('div', { style: 'align-self:end;padding-bottom:8px' }, checkField('Boss / miniboss', 'target.boss'))),
+    sub('target-types', ['Enemy types ', countBadge(typeCount)],
+      () => [...(state.target.mobs || []), ...(state.target.families || [])].join(', ') || 'none', [
+        targetChips('mobs', MOB_TYPES),
+        h('h3', {}, 'Creature'),
+        targetChips('families', TARGET_FAMILIES),
+      ], !state.target.enemy),
+    sub('target-situation', 'Situation', () => joinParts(
+      state.player.firstHit ? 'first hit' : '', state.player.fullHealth ? 'full health' : '',
+      state.player.lowHealth ? 'below 20% HP' : '', state.player.recentlyHit ? 'just hit' : '',
+      state.target.attackedYou ? 'target attacked you' : '', state.target.isolated ? 'isolated target' : '',
+      { close: 'within 1.5 blocks', far: '3+ blocks away' }[state.target.distance] || '') || 'default', [
+      h('div', { class: 'grid' },
+        checkField('First hit(s) on mob', 'player.firstHit'),
+        checkField('At full health', 'player.fullHealth'),
+        checkField('Below 20% health', 'player.lowHealth'),
+        checkField('Was just hit', 'player.recentlyHit'),
+        checkField('Target has attacked you', 'target.attackedYou'),
+        checkField('No other mobs within 15 blocks', 'target.isolated'),
+        selectField('Distance to target', 'target.distance',
+          [['close', 'Within 1.5 blocks'], ['normal', '1.5–3 blocks'], ['far', 'More than 3 blocks']])),
+    ]),
+  ], true);
+}
+
+const SECTIONS = [
+  ['target', 'Target'], ['weapon', 'Weapon'], ['armor', 'Armor'], ['equipment', 'Equipment'],
+  ['pet', 'Pet'], ['accessories', 'Accessories'], ['shards', 'Shards'], ['buffs', 'Buffs & skills'],
+];
+
+// Section shortcuts in the top bar: open the panel and scroll to it.
+// Header controls: expand / collapse every section. Rendered once; doesn't depend on state.
+function renderNav() {
+  const nav = document.getElementById('nav');
+  if (nav.childElementCount) return;
+  const setAll = (open) => SECTIONS.forEach(([key]) => {
+    const el = document.getElementById(`panel-${key}`);
+    if (el) { el.open = open; rememberOpen(key, open); }
+  });
+  nav.replaceChildren(
+    h('button', { type: 'button', title: 'Expand all sections', onclick: () => setAll(true) }, 'Expand all'),
+    h('button', { type: 'button', title: 'Collapse all sections', onclick: () => setAll(false) }, 'Collapse all'),
+  );
+}
+
+function rerenderForm() {
+  syncDungeonMode(); // before rendering: star labels and class controls depend on it
+  liveUpdaters.clear();
+  const builders = { target: targetSection, weapon: weaponSection, armor: armorSection, equipment: equipmentSection,
+    pet: petSection, accessories: accessorySection, shards: shardSection, buffs: bonusSection };
+  const form = document.getElementById('config');
+  form.replaceChildren(
+    ...SECTIONS.map(([key]) => builders[key]()),
+    h('div', { style: 'display:flex;justify-content:flex-end' }, h('button', { type: 'button', class: 'ghost', onclick: () =>
+      confirmModal({
+        title: 'Reset all fields?',
+        message: 'This clears your gear, pet, accessories, shards, buffs and target. It can\'t be undone.',
+        confirmLabel: 'Reset everything',
+        danger: true,
+      }).then((ok) => { if (ok) { state = defaultState(); rerenderForm(); } }),
+    }, 'Reset all fields')),
+  );
+  update();
+}
+
+// Generic two-way binding via data-path
+function onFormInput(e) {
+  const el = e.target;
+  const path = el.dataset?.path;
+  if (!path) return;
+  let v;
+  if (el.type === 'checkbox') v = el.checked;
+  else if (el.dataset.num) v = el.value === '' ? undefined : Number(el.value);
+  else v = el.value;
+  // Browsers don't stop typing past min/max, so clamp; fix the field once editing is done.
+  if (el.type === 'number' && v !== undefined) {
+    const clamped = Math.min(el.max === '' ? Infinity : Number(el.max), Math.max(el.min === '' ? -Infinity : Number(el.min), v));
+    if (clamped !== v && e.type === 'change') el.value = clamped;
+    v = clamped;
+  }
+  setPath(path, v);
+  // Hand-edited target stats no longer match the chosen enemy.
+  if (state.target.enemy && /^target\.(boss|maxHp|defense)$/.test(path)) {
+    state.target.enemy = '';
+    return rerenderForm();
+  }
+  if (el.dataset.rerender && e.type === 'change') return rerenderForm();
+  update();
+}
+
+// ---------- results ----------
+function buildInput() {
+  const piece = (s) => ({ ...s, item: byId.get(s.id) });
+  return {
+    weapon: piece(state.weapon),
+    armor: ARMOR_SLOTS.map((s) => piece(state.armor[s])),
+    equipment: EQUIP_SLOTS.map((s) => piece(state.equipment[s.key])),
+    magicalPower: state.magicalPower,
+    power: state.power,
+    tuning: state.tuning,
+    shards: state.shards,
+    pet: resolvedPet(),
+    petExtras: state.petExtras,
+    combatLevel: state.combatLevel,
+    catacombsLevel: state.catacombsLevel,
+    dungeonMode: state.dungeonMode,
+    godPotion: state.godPotion,
+    dungeonClass: state.dungeonClass,
+    setInputs: state.setInputs,
+    bonuses: state.bonuses,
+    target: state.target,
+    player: state.player,
+  };
+}
+
+let lastBow = null;
+function update() {
+  saveState();
+  if (!items) return;
+  const r = calculate(buildInput());
+  if (lastBow !== null && lastBow !== r.bow) { lastBow = r.bow; rerenderForm(); return; }
+  lastBow = r.bow;
+
+  const mp = state.magicalPower || 0;
+  const pm = document.getElementById('power-mult');
+  if (pm) pm.textContent = `Power stat multiplier: ×${powerMultiplier(mp).toFixed(2)}`;
+  const ti = document.getElementById('tuning-info');
+  if (ti) {
+    const used = Object.values(state.tuning).reduce((a, b) => a + (b || 0), 0);
+    ti.textContent = `${used} / ${tuningPoints(mp)} points`;
+  }
+  renderResults(r);
+  renderPetLore(r);
+  for (const fn of liveUpdaters) fn();
+  renderNav();
+}
+
+function renderResults(r) {
+  const statRows = ['DAMAGE', 'STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE'];
+  const breakdown = h('table', { class: 'kv' },
+    h('tr', { class: 'head' }, h('td', {}, 'Source'), statRows.map((s) => h('td', {}, STAT_SHORT[s]))),
+    r.sources.filter((s) => statRows.some((k) => s.stats[k])).map((s) =>
+      h('tr', {}, h('td', {}, s.label), statRows.map((k) => h('td', {}, s.stats[k] ? fmt(s.stats[k], 1) : '')))),
+    h('tr', { class: 'total' }, h('td', {}, 'Total'),
+      h('td', {}, fmt(r.damage, 1)), h('td', {}, fmt(r.strength, 1)), h('td', {}, fmt(r.critDamage, 1)), h('td', {}, fmt(r.critChance, 1))),
+  );
+  const list = (rows, fmtV, total) => h('table', { class: 'kv' },
+    rows.length ? rows.map((x) => h('tr', {}, h('td', {}, x.label), h('td', {}, fmtV(x.value))))
+      : h('tr', {}, h('td', { class: 'muted' }, 'None')),
+    h('tr', { class: 'total' }, h('td', {}, 'Multiplier'), h('td', {}, `×${fmt(total, 4)}`)));
+
+
+  // The damage chain: each step multiplies into the next.
+  const step = (k, note, v, cls2 = '') => h('div', { class: `chain-row ${cls2}` },
+    h('div', { class: 'k' }, k, note ? h('small', {}, note) : ''), h('div', { class: 'v' }, v));
+  const chain = h('div', { class: 'chain' },
+    step('Base damage', `(5 + ${fmt(r.damage, 1)} Damage) × (1 + ${fmt(r.strength, 1)}% Strength)`, fmt(r.initial, 1)),
+    step('Additive bonuses', `${r.additive.length} source${r.additive.length === 1 ? '' : 's'}`, `×${fmt(r.additiveMult, 3)}`),
+    step('Multiplicative bonuses', `${r.multiplicative.length} source${r.multiplicative.length === 1 ? '' : 's'}`, `×${fmt(r.multMult, 3)}`),
+    step('Non-crit hit', '', fmt(r.nonCrit), 'total'),
+    step('Crit multiplier', `1 + ${fmt(r.critDamage, 1)}% Crit Damage${r.soulEaterStr ? ' (+ Soul Eater Strength)' : ''}`, `×${fmt(r.critMult, 3)}`),
+  );
+
+  const card = (title, ...body) => h('section', { class: 'card glass' }, h('h2', {}, title), ...body);
+  const detail = (key, title, summary, body, open = false) => sub(`res-${key}`, title, summary, body, open);
+
+  renderHero(r);
+
+  document.getElementById('results').replaceChildren(
+    card('How it adds up', chain),
+    card('Your stats',
+      h('div', { class: 'stat-tiles' },
+        [['Damage', r.damage], ['Strength', r.strength], ['Crit Dmg', r.critDamage], ['Crit Chance', r.critChance]]
+          .map(([k, v]) => h('div', {}, h('b', {}, fmt(v, 1)), h('span', {}, k)))),
+      detail('stats', 'Where stats come from', `${r.sources.filter((s) => statRows.some((k) => s.stats[k])).length} sources`, breakdown),
+      detail('additive', 'Additive bonuses', `×${fmt(r.additiveMult, 3)}`, list(r.additive, (v) => `+${fmt(v, 2)}%`, r.additiveMult)),
+      detail('mult', 'Multiplicative bonuses', `×${fmt(r.multMult, 3)}`, list(r.multiplicative, (v) => `×${fmt(v, 3)}`, r.multMult)),
+      detail('formula', 'Full formula', '', h('div', { class: 'formula' },
+        `(5 + ${fmt(r.damage, 1)}) × (1 + ${fmt(r.strength, 1)}/100)`, h('br'),
+        `= ${fmt(r.baseDamage, 1)} × ${fmt(r.strengthMult, 4)} = ${fmt(r.initial, 1)}`, h('br'),
+        `× additive ${fmt(r.additiveMult, 4)} × mult ${fmt(r.multMult, 4)}`, h('br'),
+        `= ${fmt(r.nonCrit)} non-crit`, h('br'),
+        `× crit (1 + ${fmt(r.critDamage, 1)}/100) = ${fmt(r.crit)}`))),
+    r.notes.length ? card('Notes', h('ul', { class: 'notes' }, r.notes.map((n) => h('li', {}, n)))) : '',
+  );
+
+}
+
+// Final damage panel in the top-right corner: always visible while editing anywhere on the page.
+let lastHero = null;
+function renderHero(r) {
+  const changed = (k) => lastHero && lastHero[k] !== r[k];
+  const num = (k, cls) => h('div', { class: `hero-num ${cls}${changed(k) ? ' bump' : ''}` }, fmt(r[k]));
+  document.getElementById('hero').replaceChildren(
+    h('div', { class: 'hero-stat crit' }, h('span', { class: 'hero-lbl' }, 'Critical hit'), num('crit', 'crit')),
+    h('div', { class: 'hero-row' },
+      h('div', { class: 'hero-stat' }, h('span', { class: 'hero-lbl' }, 'Non-crit'), num('nonCrit', '')),
+      h('div', { class: 'hero-stat' }, h('span', { class: 'hero-lbl' }, `Average · ${fmt(r.critChance, 1)}% crit`), num('expected', 'avg'))),
+  );
+  lastHero = { crit: r.crit, nonCrit: r.nonCrit, expected: r.expected };
+}
+
+// Keep layout offsets in sync with the header and the corner damage panel (their heights vary
+// with content and screen width): --header-h and --hero-h drive the results column position.
+function trackHeaderHeight() {
+  const root = document.documentElement.style;
+  const watch = (id, prop) => {
+    const el = document.getElementById(id);
+    const set = () => root.setProperty(prop, `${el.getBoundingClientRect().height}px`); // unrounded
+    new ResizeObserver(set).observe(el);
+    set();
+  };
+  watch('topbar', '--header-h');
+  watch('hero', '--hero-h');
+}
+
+// Summary column: fade its top / bottom edge while there is more content scrolled out of view
+// that way (classes drive a CSS mask). Re-checked on scroll, resize and whenever the results
+// re-render or a breakdown is opened or closed.
+function trackResultsOverflow() {
+  const el = document.getElementById('results');
+  const set = () => {
+    el.classList.toggle('more-above', el.scrollTop > 0);
+    el.classList.toggle('more-below', el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+  };
+  el.addEventListener('scroll', set, { passive: true });
+  new ResizeObserver(set).observe(el);
+  new MutationObserver(set).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] });
+  set();
+}
+
+// ---------- boot ----------
+async function boot(force = false) {
+  const status = document.getElementById('api-status');
+  status.className = 'api-status';
+  status.textContent = 'Loading items from Hypixel API…';
+  try {
+    items = await loadItems({ force });
+    byId.clear();
+    for (const i of [...items.weapons, ...Object.values(items.armor).flat(), ...Object.values(items.equipment).flat()]) byId.set(i.id, i);
+    status.title = `${fmt(byId.size)} items from the Hypixel API, updated ${new Date(items.lastUpdated).toLocaleDateString()}`;
+    status.replaceChildren(
+      `${fmt(byId.size)} items`,
+      h('button', { type: 'button', title: 'Reload item data from the Hypixel API', onclick: () => boot(true) }, 'Refresh'));
+    rerenderForm();
+  } catch (err) {
+    status.className = 'api-status error';
+    status.replaceChildren(`Could not load items: ${err.message}`, h('button', { type: 'button', onclick: () => boot(true) }, 'Retry'));
+    return;
+  }
+  // Pet data is optional; the calculator works without it.
+  try {
+    pets = await loadPets({ force });
+  } catch (err) {
+    pets = { error: err.message };
+  }
+  rerenderForm();
+}
+
+const form = document.getElementById('config');
+form.addEventListener('input', onFormInput);
+form.addEventListener('change', onFormInput);
+form.addEventListener('submit', (e) => e.preventDefault());
+trackHeaderHeight();
+trackResultsOverflow();
+boot();

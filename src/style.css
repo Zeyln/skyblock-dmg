@@ -1,0 +1,585 @@
+/* Light, flat theme: solid white panels with solid borders on a plain grey page. */
+
+/* Minecraft-style pixel font (MIT, see public/fonts/LICENSE-marlowww.txt). ASCII only;
+   other characters (⚚, ✪, accents) fall back to the next font in the stack. */
+@font-face {
+  font-family: 'Marlowww';
+  src: url('/fonts/marlowww.otf') format('opentype');
+  font-display: swap;
+}
+:root {
+  --font-mc: 'Marlowww', Inter, system-ui, sans-serif;
+}
+
+:root {
+  --text: #1d2233;
+  --muted: #667089;
+  --faint: #8d95ab;
+  --page: #e3e6ed;          /* page background */
+  --line: #dbdfe7;          /* dividers inside panels */
+  --line-strong: #c6ccd8;   /* field and control borders */
+  --glass: #ffffff;         /* panel surface (name kept from the old theme) */
+  --glass-strong: #ffffff;  /* emphasised surfaces: damage panel, dialog, hovers */
+  --glass-border: #cfd4df;  /* panel borders */
+  --field: #ffffff;
+  --inset: #f1f3f7;         /* nested rows inside panels */
+  --accent: #5b5bd6;
+  --accent-ink: #4343b8;
+  --accent-soft: rgba(91, 91, 214, .12);
+  --crit: #e5484d;
+  --good: #12a594;
+  --warn: #c2620e;
+  --radius: 16px;
+  --radius-sm: 10px;
+  font-family: var(--font-mc);
+  font-synthesis: none;          /* the pixel font has a single weight; no faux bold/italic */
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: calc(var(--header-h, 52px) + var(--gap, 16px) * 2); }
+body {
+  margin: 0; color: var(--text); font-size: 14px; line-height: 1.4; min-height: 100vh;
+  background: var(--page);
+}
+/* Scrollbars: slim thumbs that blend with the panels.
+   Chromium/Edge use the ::-webkit-scrollbar rules (rounded, padded thumb). Setting the standard
+   scrollbar-color there would override them, so it's only applied in Firefox. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(95, 105, 150, .32); border-radius: 999px;
+  border: 3px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: rgba(91, 91, 214, .55); }
+::-webkit-scrollbar-thumb:active { background-color: rgba(91, 91, 214, .75); }
+::-webkit-scrollbar-corner { background: transparent; }
+/* Inner scroll areas (results column, tables) get a slimmer bar. */
+.results::-webkit-scrollbar, .table-scroll::-webkit-scrollbar, .formula::-webkit-scrollbar { width: 8px; height: 8px; }
+.results::-webkit-scrollbar-thumb, .table-scroll::-webkit-scrollbar-thumb, .formula::-webkit-scrollbar-thumb { border-width: 2px; }
+@supports (-moz-appearance: none) {
+  * { scrollbar-width: thin; scrollbar-color: rgba(95, 105, 150, .4) transparent; }
+}
+
+h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+h3 {
+  font-size: 11px; margin: 16px 0 8px; color: var(--faint); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em;
+}
+h3:first-child { margin-top: 0; }
+
+/* Solid surface (class name kept from the old glass theme). */
+.glass {
+  background: var(--glass);
+  --bc: var(--glass-border); border: 2px solid var(--bc);
+}
+
+/* ---------- frame: header, damage panel and summary column ---------- */
+/* The header, the damage panel and the summary column float with an even --gap around and
+   between them. The right column (--side-w) is fixed; only the main form scrolls. */
+:root { --side-w: 400px; --gutter: 20px; --gap: 16px; }
+
+/* Header: fixed at the top-left, ending a --gap before the damage panel. */
+.topbar {
+  position: fixed; top: var(--gap); z-index: 20;
+  left: var(--gutter); right: calc(var(--side-w) + var(--gutter) + var(--gap));
+  border-width: 2px;
+}
+.topbar-row { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 10px 16px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+/* Flat grass block: green top, brown bottom (same colours as before, no gradient). */
+.logo {
+  width: 22px; height: 22px; border-radius: 7px;
+  background: #0ca528;
+  box-shadow: inset 0 -12px 0 #6b3d14;
+}
+/* Expand / Collapse all — pushed to the right of the title. */
+.nav { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+.nav button {
+  flex: none; --bc: transparent; border: var(--px) solid var(--bc); background: transparent; color: var(--muted); white-space: nowrap;
+  padding: 5px 10px; font-size: 12.5px; font-weight: 500;
+}
+.nav button:hover { background: var(--glass-strong); color: var(--text); --bc: var(--line); }
+.api-status { color: var(--muted); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.api-status.error { color: var(--crit); }
+
+/* Main form on the left; the second grid column stays empty and reserves room for the fixed
+   right column. */
+.layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--side-w); gap: var(--gap);
+  /* Starts below the fixed header (--header-h is measured in main.js). */
+  padding: calc(var(--gap) * 2 + var(--header-h, 52px)) var(--gutter) 40px;
+}
+.config { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* Flex/grid children default to min-content width; the one-line panel summaries would widen the page. */
+.config > *, .results > *, .panel, .sub, .panel > summary, .sub > summary { min-width: 0; }
+
+/* Damage panel: fixed at the top-right, as tall as its content (reaches below the header). */
+.hero-panel {
+  position: fixed; top: var(--gap); right: var(--gutter); z-index: 30; width: var(--side-w);
+  padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px;
+  background: var(--glass-strong); border-width: 2px;
+}
+.hero-panel:empty { display: none; }
+.hero-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hero-lbl { font-size: 11px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: .07em; }
+.hero-num { font-size: 24px; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; }
+.hero-stat.crit .hero-num { font-size: 52px; color: var(--crit); }
+.hero-num.avg { color: var(--good); }
+.hero-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* Brief highlight when a number changes. */
+.hero-num.bump { animation: hero-bump .45s ease-out; }
+@keyframes hero-bump { 0% { transform: translateY(-2px); opacity: .55; } 100% { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .hero-num.bump { animation: none; } }
+
+/* Summary column: fixed under the damage panel; scrolls inside itself, never with the page.
+   (--hero-h is measured in main.js.) */
+.results {
+  position: fixed; right: var(--gutter); width: var(--side-w);
+  top: calc(var(--gap) * 2 + var(--hero-h, 200px)); bottom: var(--gap);
+  overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 14px;
+}
+/* Fade the column's top / bottom edge while more content is scrolled out of view that way
+   (classes set in main.js), matching the fade under the header. */
+.results {
+  --fade-top: 0px; --fade-bottom: 0px;
+  -webkit-mask-image: linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
+  mask-image: linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
+}
+.results.more-above { --fade-top: 14px; }
+.results.more-below { --fade-bottom: 14px; }
+
+@media (max-width: 1000px) {
+  .topbar { top: 0; left: 0; right: 0; border-width: 0 0 2px; }
+  .topbar-row { padding: 10px 16px; gap: 6px 12px; }
+  .layout { grid-template-columns: minmax(0, 1fr); padding: 14px 16px 40px; }
+  /* No room for side columns: the damage panel becomes a strip pinned under the header,
+     and the summary flows below the form. */
+  .hero-panel {
+    position: sticky; top: var(--header-h, 52px); margin-top: var(--header-h, 52px); width: auto; z-index: 19;
+    flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 8px 24px;
+    padding: 10px 16px; border-width: 0 0 2px;
+  }
+  .hero-stat.crit .hero-num { font-size: 32px; }
+  .hero-num { font-size: 20px; }
+  .hero-row { display: flex; gap: 20px; }
+  .results { position: static; width: auto; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+}
+@media (max-width: 640px) {
+  .panel > summary { flex-wrap: wrap; row-gap: 2px; padding: 12px 14px; }
+  .panel > summary .panel-summary { order: 3; flex-basis: 100%; }
+  .panel-body { padding: 2px 14px 14px; }
+}
+
+/* ---------- panels (collapsible sections) ---------- */
+.panel { border-radius: var(--radius); }
+.panel > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; border-radius: var(--radius); user-select: none;
+}
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary:hover { background: var(--inset); }
+.panel-title { font-weight: 650; font-size: 15px; white-space: nowrap; }
+.panel-summary {
+  color: var(--muted); font-size: 12.5px; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Pixel chevrons, drawn like the font: five 2px squares in a staircase. Coloured by background
+   through an SVG mask; rotations are multiples of 90° so the squares stay on the pixel grid. */
+.chev, .combo-caret {
+  background: var(--faint); flex: none;
+  -webkit-mask: var(--chev-mask) center / 100% 100% no-repeat; mask: var(--chev-mask) center / 100% 100% no-repeat;
+}
+.chev {
+  /* Points right; turns down when the panel is open. */
+  --chev-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 5' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM1 3h1v1H1zM0 4h1v1H0z'/%3E%3C/svg%3E");
+  width: 6px; height: 10px; margin-left: auto; margin-right: 2px;
+}
+details[open] > summary .chev { transform: rotate(90deg); }
+.panel-body { padding: 2px 18px 18px; }
+.panel[open] > summary { border-bottom: var(--px) solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
+.panel[open] > .panel-body { padding-top: 14px; }
+
+/* nested sub-panels (slot upgrades, enchant groups, shard groups) */
+.sub { --bc: var(--line); border: var(--px) solid var(--bc); border-radius: var(--radius-sm); background: var(--inset); margin-top: 10px; }
+.sub > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; font-size: 13px; font-weight: 600; color: var(--text);
+}
+.sub > summary::-webkit-details-marker { display: none; }
+.sub > summary .panel-summary { font-weight: 400; }
+.sub-body { padding: 4px 12px 12px; }
+
+.hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.muted { color: var(--muted); }
+.count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+  padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 11px; font-weight: 600;
+}
+.count.zero { background: rgba(110, 120, 160, .1); color: var(--faint); }
+
+/* ---------- form controls ---------- */
+.grid { display: grid; gap: 10px 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.grid.wide { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; font-weight: 500; }
+.field-label { display: block; }
+label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
+input, select, button {
+  font: inherit; color: var(--text); background: var(--field);
+  --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: var(--radius-sm); padding: 7px 10px; min-width: 0;
+  transition: border-color .12s, box-shadow .12s, background .12s;
+}
+input:focus, select:focus { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: #fff; }
+input[type=number] { width: 100%; }
+input[type=checkbox], input[type=radio] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+select:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
+button { cursor: pointer; font-weight: 500; }
+button:focus-visible { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+button:hover { --bc: var(--accent); color: var(--accent-ink); }
+button.primary { background: var(--accent); color: #fff; --bc: var(--accent); }
+button.ghost { background: transparent; }
+button.link { --bc: transparent; border: none; background: none; color: var(--faint); padding: 2px 6px; }
+button.link:hover { color: var(--crit); }
+
+/* ---------- item slots ---------- */
+.slot { padding: 12px 0; border-top: var(--px) solid var(--line); }
+.slot:first-child { border-top: none; padding-top: 0; }
+.slot-head { display: grid; grid-template-columns: 120px minmax(0, 1fr) 160px; gap: 10px; align-items: end; }
+.slot-head .combo { width: 100%; }
+.slot-head .name { font-weight: 600; padding-bottom: 8px; }
+.item-stats { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.upgrades { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: end; }
+.upgrades .combo { width: 100%; }
+.gems, .anvil { display: grid; gap: 10px 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); align-items: end; margin-top: 10px; }
+.anvil .muted { font-size: 11px; }
+.weapon-bonus { color: var(--accent-ink); font-weight: 500; margin: 10px 0 0; }
+@media (max-width: 640px) {
+  .upgrades { grid-template-columns: minmax(0, 1fr); }
+  .slot-head { grid-template-columns: minmax(0, 1fr) 150px; }
+  .slot-head .name { grid-column: 1 / -1; padding: 0; }
+}
+.presets {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; padding: 12px;
+  margin-bottom: 6px; background: var(--accent-soft); border-radius: var(--radius-sm);
+}
+
+.tier { font-weight: 600; }
+.tier-COMMON { color: #7b7f8c; } .tier-UNCOMMON { color: #1e8f3a; } .tier-RARE { color: #2f63d1; }
+.tier-EPIC { color: #8c35b8; } .tier-LEGENDARY { color: #c28a00; } .tier-MYTHIC { color: #c4309f; }
+.tier-SPECIAL, .tier-VERY_SPECIAL { color: #c43f3f; } .tier-DIVINE { color: #1aa3b3; }
+
+.grid.disabled { opacity: .4; pointer-events: none; }
+.conflict { color: var(--crit); font-size: 11px; }
+.mobs { display: flex; flex-wrap: wrap; gap: 6px; }
+.mobs label {
+  --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: 999px; padding: 4px 11px; cursor: pointer;
+  user-select: none; font-size: 12.5px; background: var(--inset);
+}
+.mobs input { display: none; }
+.mobs label:hover { --bc: var(--accent); }
+.mobs label:has(input:checked) { background: var(--accent); --bc: var(--accent); color: #fff; }
+
+/* fight location strip */
+.location {
+  display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 14px;
+  border-radius: var(--radius-sm); background: var(--inset); --bc: var(--line); border: var(--px) solid var(--bc); margin: 12px 0 14px;
+}
+.location .badge {
+  padding: 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: rgba(110, 120, 160, .12); color: var(--muted);
+}
+.location .badge.dungeon { background: rgba(91, 91, 214, .14); color: var(--accent-ink); }
+.location .badge.master { background: rgba(229, 72, 77, .12); color: #c3363b; }
+.location .hint { flex-basis: 100%; margin: 0; }
+.location .class-row { flex-basis: 100%; }
+.segmented { display: inline-flex; padding: 3px; border-radius: 999px; background: rgba(110, 120, 160, .12); }
+.segmented label { padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.segmented input { display: none; }
+.segmented label:has(input:checked) { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(60, 70, 140, .15); }
+
+.pet-lore { margin-top: 12px; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.pet-lore .ability { color: var(--text); font-weight: 600; margin-top: 8px; }
+.tag { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; margin-left: 6px; background: rgba(110, 120, 160, .12); color: var(--faint); }
+.tag.on { color: #0b7a6e; background: rgba(18, 165, 148, .14); }
+
+table.rows { width: 100%; border-collapse: collapse; }
+table.rows th { text-align: left; font-weight: 600; color: var(--faint); font-size: 11px; padding: 4px; text-transform: uppercase; letter-spacing: .05em; }
+table.rows td { padding: 3px 4px; }
+table.rows input { width: 100%; }
+.table-scroll { overflow-x: auto; }
+
+/* ---------- results ---------- */
+.card { border-radius: var(--radius); padding: 16px 18px; }
+.card h2 { font-size: 13px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+
+.chain { display: flex; flex-direction: column; gap: 6px; }
+.chain-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--inset); }
+.chain-row .k { font-size: 12.5px; color: var(--muted); }
+.chain-row .k small { display: block; color: var(--faint); font-size: 11px; }
+.chain-row .v { font-weight: 650; font-variant-numeric: tabular-nums; }
+.chain-row.total { background: var(--accent-soft); }
+.chain-row.total .v { color: var(--accent-ink); }
+
+.stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stat-tiles div { padding: 8px; border-radius: var(--radius-sm); background: var(--inset); text-align: center; }
+.stat-tiles b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.stat-tiles span { font-size: 11px; color: var(--muted); }
+
+.results .sub { background: var(--inset); }
+.formula { font-size: 12px; background: var(--inset); border-radius: var(--radius-sm); padding: 10px; line-height: 1.7; overflow-x: auto; }
+.kv { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.kv td { padding: 4px 0; border-bottom: var(--px) solid var(--line); vertical-align: top; }
+.kv td:not(:first-child) { text-align: right; padding-left: 8px; white-space: nowrap; }
+.kv tr.head td { color: var(--faint); font-size: 11px; }
+.kv tr.total td { font-weight: 700; border-bottom: none; }
+.notes { font-size: 12px; color: var(--muted); padding-left: 18px; margin: 0; }
+.notes li + li { margin-top: 4px; }
+
+/* ---------- themed dropdown (combo.js) ---------- */
+.combo { position: relative; min-width: 0; }
+.combo-btn, .combo-field {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-height: 36px; text-align: left;
+  background: var(--field); --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: var(--radius-sm);
+  padding: 6px 30px 6px 10px; position: relative; color: var(--text); font-weight: 400;
+}
+.combo-btn:hover, .combo-field:hover { --bc: rgba(91, 91, 214, .45); color: var(--text); }
+.combo.is-open .combo-btn, .combo.is-open .combo-field, .combo-field:focus-within, .combo-btn:focus-visible {
+  --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: #fff;
+}
+.combo-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.combo-placeholder { color: var(--faint); }
+/* The inner text box must not inherit the input corner radius: its text starts at the left
+   edge, so rounded corners would clip the first letters. */
+.combo-input {
+  flex: 1; min-width: 0; border: none; border-radius: 0; background: transparent; padding: 0 0 0 1px;
+  box-shadow: none; font-weight: 600;
+}
+.combo-input:focus { box-shadow: none; background: transparent; }
+.combo-input::placeholder { color: var(--faint); font-weight: 400; }
+.combo-caret {
+  /* Points down; flips up while the list is open. */
+  --chev-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 3' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 1h1v1H3zM4 0h1v1H4z'/%3E%3C/svg%3E");
+  position: absolute; right: 12px; top: calc(50% - 3px); width: 10px; height: 6px; cursor: pointer;
+}
+.combo.is-open .combo-caret { transform: scaleY(-1); }
+.combo.is-disabled .combo-btn { opacity: .55; cursor: not-allowed; }
+/* Formatted (§-coded) names: styled overlay on top of the text box while it isn't being edited. */
+.combo-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.combo-rich {
+  position: absolute; left: 1px; right: 0; top: 50%; transform: translateY(-50%); pointer-events: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;
+}
+.combo-field.has-rich:not(:focus-within) .combo-input { color: transparent; }
+.combo-field.has-rich:focus-within .combo-rich, .combo.is-open .combo-rich { display: none; }
+.mc-obf { filter: blur(1.5px); }
+
+/* While searching, the typed text is neutral and the selected item's icons step aside. */
+.combo.is-open .combo-input { color: var(--text); font-weight: 500; }
+.combo.is-open .combo-field > .combo-prefix, .combo.is-open .combo-field > .combo-suffix { display: none; }
+.combo-label { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
+.combo-prefix { font-weight: 700; flex: none; font-size: 15px; line-height: 1; font-family: 'Segoe UI Symbol', 'Noto Sans Symbols', var(--font-mc); }
+.combo-suffix { flex: none; font-size: 12px; }
+
+.combo-pop {
+  /* Above the page content but below the fixed header (20), the strip above it (19) and the
+     damage panel (30), so a list scrolls out of sight behind them like the rest of the page. */
+  position: fixed; z-index: 15; overflow-y: auto; padding: 6px; border-radius: 14px; width: max-content; scrollbar-gutter: stable;
+  background: #fff;
+}
+.combo-group {
+  padding: 8px 10px 4px; font-size: 10.5px; font-weight: 700; color: var(--faint);
+  text-transform: uppercase; letter-spacing: .07em; position: sticky; top: -6px; background: #fff;
+}
+.combo-opt {
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 9px; cursor: pointer;
+  font-size: 13px; color: var(--text);
+}
+.combo-opt.is-active { background: var(--accent-soft); }
+.combo-opt.is-selected { font-weight: 600; }
+.combo-opt.is-selected::after { content: '✓'; margin-left: 4px; color: var(--accent); font-weight: 700; order: 9; }
+.combo-opt.is-disabled { opacity: .45; cursor: default; }
+/* The name has priority: the note (stats, HP…) gives up its room first, and a name that still
+   doesn't fit wraps onto a second line instead of being cut off. */
+.combo-opt-label { flex: 0 1 auto; min-width: 0; overflow-wrap: break-word; }
+.combo-note {
+  flex: 0 1000 auto; min-width: 0; margin-left: auto; padding-left: 10px;
+  font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400;
+}
+.combo-empty { padding: 8px 10px; font-size: 12px; color: var(--faint); }
+.combo-opt mark { background: rgba(245, 165, 36, .3); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+/* in-game markers */
+.star-icons { display: inline-flex; align-items: center; letter-spacing: 1px; font-size: 13px; white-space: nowrap; font-family: 'Segoe UI Symbol', 'Noto Sans Symbols', var(--font-mc); }
+.star-gold { color: #d6a100; }
+.star-pink { color: #c4309f; }  /* §d, stars 6-10 on Crimson Isle gear */
+.star-aqua { color: #1a9fb0; }  /* §b, stars 11-15 */
+.ench-ultimate { color: #c4309f; font-weight: 700; }
+.enemy-boss { font-weight: 600; }
+.gem-RUBY { color: #d33a3a; } .gem-AMETHYST { color: #8c35b8; } .gem-SAPPHIRE { color: #2f8fd1; }
+.gem-JASPER { color: #c4309f; } .gem-ONYX { color: #3b3f4a; } .gem-OPAL { color: #8d95ab; }
+
+/* confirmation modal */
+.modal {
+  width: min(420px, calc(100vw - 32px)); padding: 22px 22px 18px; border-radius: 20px; color: var(--text);
+  background: var(--glass-strong);
+}
+.modal::backdrop { background: rgba(40, 46, 80, .35); }
+.modal[open] { animation: modal-in .16s ease-out; }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.modal h2 { font-size: 17px; margin: 0 0 8px; }
+.modal p { margin: 0 0 20px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions button { padding: 8px 14px; }
+button.danger { background: var(--crit); --bc: var(--crit); color: #fff; }
+button.danger:hover { background: #d13a3f; color: #fff; --bc: #d13a3f; }
+button.primary:hover { color: #fff; }
+
+
+/* ---------- Minecraft font: used for all text (set on :root) ---------- */
+/* Item names = the item / pet / pet-item pickers (combo className "mc") and their open lists. */
+h1, .panel-title, .card h2, .modal h2,
+.hero-num, .chain-row .v, .stat-tiles b,
+.combo.mc .combo-input, .combo.mc .combo-rich, .combo-pop.mc .combo-opt-label {
+  letter-spacing: 0;
+}
+/* Pixel glyphs need a little more size to read like the UI font. */
+.panel-title { font-size: 16px; }
+.card h2 { font-size: 13px; text-transform: none; letter-spacing: .02em; }
+.combo.mc .combo-input, .combo.mc .combo-rich, .combo-pop.mc .combo-opt-label { font-size: 14px; }
+.combo-pop.mc .combo-opt.is-selected .combo-opt-label { font-weight: 400; }
+
+/* Star dropdown: in-game icons + stat bonus */
+.star-option { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.star-bonus { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Master star badge: flat red circled digit like the in-game ➊–➎ (red §c, digit cut out),
+   sized to sit beside the ✪ glyphs. */
+.master-star {
+  display: inline-grid; place-items: center; flex: none;
+  width: 14px; height: 14px; margin-left: 3px; border-radius: 50%;
+  background: var(--mc-red, #d33a3a);
+  color: #fff; font: 9.5px/1 var(--font-mc); letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Set / piece bonus list */
+.set-list { display: flex; flex-direction: column; gap: 6px; }
+.set-row { padding: 8px 10px; border-radius: var(--radius-sm); background: var(--inset); --bc: var(--line); border: var(--px) solid var(--bc); }
+.set-row.on { --bc: rgba(18, 165, 148, .35); }
+.set-head { display: flex; align-items: center; gap: 6px; }
+.set-name { font-weight: 600; font-size: 13px; }
+.set-head .tag { margin-left: auto; }
+.set-text { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* =====================================================================
+   Pixel edges — echo the Minecraft font: stepped (two-pixel staircase)
+   corners and crisp 2px borders on flat surfaces, no rounded corners or shadows.
+   ===================================================================== */
+:root {
+  --px: 2px;                       /* one pixel of the font at UI scale */
+  --radius: 0;
+  --radius-sm: 0;
+  --bevel-dark: rgba(60, 70, 140, .16);   /* pressed-button shade */
+}
+/* Stepped corners: a 45° staircase of one-pixel (--px) steps, the same on every element.
+   --c1..--c3 are the step offsets from the corner; small elements take 2 steps (c2 = c1),
+   large surfaces 3. */
+.notch, .panel, .card, .combo-pop, .modal, .sub, .set-row, .location, .presets, .chain-row, .stat-tiles div,
+input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context span, .badge, .segmented, .segmented label,
+.nav button, .formula, .logo, .topbar, .hero-panel {
+  --c1: var(--px);
+  --c2: var(--px);
+  --c3: calc(var(--px) * 2);
+  border-radius: 0 !important;
+  clip-path: polygon(
+    /* top-left */
+    0 var(--c3), var(--c1) var(--c3), var(--c1) var(--c2), var(--c2) var(--c2), var(--c2) var(--c1), var(--c3) var(--c1), var(--c3) 0,
+    /* top-right */
+    calc(100% - var(--c3)) 0, calc(100% - var(--c3)) var(--c1), calc(100% - var(--c2)) var(--c1), calc(100% - var(--c2)) var(--c2),
+    calc(100% - var(--c1)) var(--c2), calc(100% - var(--c1)) var(--c3), 100% var(--c3),
+    /* bottom-right */
+    100% calc(100% - var(--c3)), calc(100% - var(--c1)) calc(100% - var(--c3)), calc(100% - var(--c1)) calc(100% - var(--c2)),
+    calc(100% - var(--c2)) calc(100% - var(--c2)), calc(100% - var(--c2)) calc(100% - var(--c1)),
+    calc(100% - var(--c3)) calc(100% - var(--c1)), calc(100% - var(--c3)) 100%,
+    /* bottom-left */
+    var(--c3) 100%, var(--c3) calc(100% - var(--c1)), var(--c2) calc(100% - var(--c1)), var(--c2) calc(100% - var(--c2)),
+    var(--c1) calc(100% - var(--c2)), var(--c1) calc(100% - var(--c3)), 0 calc(100% - var(--c3)));
+}
+/* Bigger surfaces: three steps. */
+.panel, .card, .combo-pop, .modal, .topbar, .hero-panel { --c2: calc(var(--px) * 2); --c3: calc(var(--px) * 3); }
+/* The inner text box sits inside a notched field; it must not be clipped itself. */
+.combo-input { clip-path: none; }
+/* Checkboxes and radio buttons keep their native shape. */
+input[type=checkbox], input[type=radio] { clip-path: none; }
+
+/* Large surfaces: one crisp 2px border, no bevel or shadow (an inner edge reads as a second panel). */
+.glass, .panel, .card, .modal, .combo-pop {
+  border-width: 2px;
+  box-shadow: none;
+}
+.topbar { box-shadow: none; }
+.panel[open] > summary { border-bottom-width: var(--px); border-radius: 0; }
+.panel > summary, .sub > summary { border-radius: 0; }
+
+/* Nested surfaces: flat, border only. */
+.sub, .set-row, .location, .chain-row, .stat-tiles div, .presets { box-shadow: none; }
+
+/* Fields and buttons: square, 2px borders; focus/hover drawn inside the edge. */
+input, button, .combo-btn, .combo-field { border-width: var(--px); }
+input:focus, select:focus, button:focus-visible,
+.combo.is-open .combo-btn, .combo.is-open .combo-field, .combo-field:focus-within, .combo-btn:focus-visible {
+  box-shadow: inset 0 0 0 var(--px) var(--accent-soft);
+}
+button:not(.link):not(.minor):active { box-shadow: inset var(--px) var(--px) 0 var(--bevel-dark); }
+
+/* Stepped corners on bordered elements: the corner cut removes the border there, so redraw it
+   as a one-pixel diagonal in the border colour (--bc), like a pixel-art outline:
+       ...###      Each corner gets a pixel at (c2, c1) and (c1, c2); on two-step
+       ..#...      corners both are the same pixel.
+       .#....
+       #.....                                                                   */
+.glass, .sub, .set-row, .location, .mobs label, .combo-btn, .combo-field,
+input:not([type=checkbox]):not([type=radio]):not(.combo-input), button {
+  --i: linear-gradient(var(--bc), var(--bc));
+  background-image: var(--i), var(--i), var(--i), var(--i), var(--i), var(--i), var(--i), var(--i) !important;
+  background-repeat: no-repeat !important;
+  background-origin: border-box !important;
+  background-size: var(--px) var(--px) !important;
+  background-position:
+    left var(--c2) top var(--c1), left var(--c1) top var(--c2),
+    right var(--c2) top var(--c1), right var(--c1) top var(--c2),
+    right var(--c2) bottom var(--c1), right var(--c1) bottom var(--c2),
+    left var(--c2) bottom var(--c1), left var(--c1) bottom var(--c2) !important;
+}
+
+/* Options, highlights and selection rows: square. */
+.combo-opt, .combo-opt mark, .nav button, .chain-row.total, mark { border-radius: 0; }
+
+
+/* Scrollbars: square thumbs. */
+::-webkit-scrollbar-thumb { border-radius: 0; }
+
+/* Edge-to-edge header and damage strip on narrow screens: straight edges. */
+@media (max-width: 1000px) {
+  .topbar, .hero-panel { clip-path: none; background-image: none !important; }
+}
+
+/* Backdrop behind the floating header, from the top of the window to the header's bottom edge,
+   in the page colour: scrolled content (and open option lists) can't peek through the gap above
+   the header or through its stepped corners. */
+body::before {
+  content: ''; position: fixed; top: 0; left: 0; right: 0; height: calc(var(--gap) + var(--header-h, 52px)); z-index: 19;
+  background: inherit; pointer-events: none;
+}
+/* Short fade just under the header, so content and open lists scrolling beneath it visibly
+   slide out of view rather than being cut off by a hard line. */
+body::after {
+  content: ''; position: fixed; z-index: 19; pointer-events: none;
+  top: calc(var(--gap) + var(--header-h, 52px)); height: 14px;
+  left: var(--gutter); right: calc(var(--side-w) + var(--gutter) + var(--gap));
+  background: linear-gradient(var(--page), transparent);
+}
+@media (max-width: 1000px) {
+  body::before, body::after { display: none; }
+}
