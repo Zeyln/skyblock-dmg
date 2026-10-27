@@ -1,67 +1,30 @@
 # SkyBlock Damage Calculator
 
-Web app that calculates single-hit melee/bow damage in Hypixel SkyBlock. Item names, rarities and base stats are pulled live from the public Hypixel items resource (`https://api.hypixel.net/v2/resources/skyblock/items`, no API key) and cached in the browser for 12 hours.
+A web app that calculates the damage of a single melee or bow hit in Hypixel SkyBlock.
 
-```
-npm install
-npm run dev      # http://localhost:5173
-npm test         # formula unit tests
-npm run build    # static site in dist/
-```
+## Scope
+
+Item names, rarities and base stats come live from the public Hypixel items API; pet data comes from the NotEnoughUpdates repo. The calculator covers:
+
+- weapon, armor and equipment, with reforges, recombobulation, stars, gemstones, potato books and enchantments
+- pets, accessories (magical power, power stone, tuning), attribute shards, set bonuses and buffs
+- dungeons: Catacombs and Master Mode boosts, and dungeon classes
+- the target: an in-game enemy or a custom mob type, HP and defense
+
+Game values follow the Hypixel SkyBlock wiki and are kept in `src/data/`.
 
 ## Formula
 
 ```
 Initial      = (5 + Damage) × (1 + Strength / 100)
-Additive     = 1 + Σ(additive %) / 100        enchants, combat skill, Ruler/Elite/Warrior shards, set bonuses…
-Multiplier   = Π(multiplicative bonuses)      weapon mob-type bonuses, user-entered ×
+Additive     = 1 + Σ additive % / 100        enchants, combat level, shards, set bonuses, pets
+Multiplier   = Π multiplicative bonuses      weapon bonuses vs mob types, dungeon class, Hedgehog
 Non-crit     = floor(Initial × Additive × Multiplier)
 Crit         = floor(Initial × Additive × Multiplier × (1 + Crit Damage / 100))
 ```
 
-Font: all text uses a Minecraft-style pixel font, `public/fonts/marlowww.otf`, converted (ASCII glyphs only) from the font textures of the MIT-licensed resource pack [Marlowww Texture pack PVP & More](https://modrinth.com/resourcepack/totem-of-marlowww) by btwreynahd; the license notice ships next to it in `public/fonts/LICENSE-marlowww.txt`. Other characters fall back to Inter.
+Every stat source is summed into Damage, Strength and Crit Damage first; each bonus then goes into the Additive or Multiplier term depending on how the game stacks it.
 
-UI: light, flat theme (solid surfaces, no translucency or gradients). Every section is a collapsible panel whose header summarises its current settings, so a collapsed page still shows the whole setup; the header has Expand all / Collapse all. Item upgrades, enchant groups, shard groups and target details fold into sub-panels with live summaries and counts. Open/closed state is remembered per browser. All dropdowns use one themed component (`src/combo.js`): long lists (items, pets, enemies, pet items, reforges) are searchable with match highlighting, short lists are buttons with type-ahead; arrow keys, Enter and Esc work everywhere. Items are coloured by rarity (the selected item by its effective rarity after recomb/quality), names with Minecraft § formatting codes (e.g. SinSeeker Scythe, Yellow Belt) render with their in-game colours and styles via `src/mctext.js` (palette darkened slightly for the light theme; search and summaries use the plain name), fragged items carry the in-game ⚚, and the Stars dropdown shows stars in-game style with the stat bonus: gold ✪ for stars 1–5; dungeon master stars as a flat red numbered badge (CSS, replaces ➊–➎); Crimson Isle / Kuudra gear past 5 stars recolours the five stars from the left, pink for stars 6–10 and aqua for 11–15 (colours from in-game memory, not documented on the wiki). The final damage (crit, non-crit, average) is a panel fixed in the top-right corner, reaching below the header, so it is always visible; it highlights briefly when it changes. On narrow screens it becomes a compact strip under the header. The summary column (step-by-step damage chain, stat totals, foldable breakdowns) is fixed under the damage panel and scrolls on its own, not with the page; the header and damage panel float with an even gap between them.
+## Font
 
-Inputs: weapon (reforge, recomb, stars, gemstones, enchants), armor (reforge, recomb, stars, gemstones), equipment (recomb, gemstones), magical power, accessory power (power stone), tuning, attribute shards, combat and Catacombs level, free-form bonus rows (pets, potions, abilities), and target (in-game enemy preset or custom mob types / boss flag / HP / defense).
-
-- Reforges: sword, bow and armor tables per rarity; recombobulation bumps rarity by one for both reforge and gem values, up to Divine. Divine items and Special-or-above items (Special, Very Special, Unobtainable, Supreme) get no stat increase from recombobulating — the checkbox is greyed out — and use the Mythic column of the reforge and gem tables. Withered and Ancient add their per-Catacombs-level bonus; Renowned adds +1% combat stats per piece.
-- Gemstones: slots come from the API's `gemstone_slots`; each slot only offers the gems it accepts. "Fill all gem slots" prefers Jasper, then Onyx.
-- Weapon bonuses vs enemies (multiplicative, wiki table): End Sword / Voidwalker / Voidedge / Vorpal / Atomsplit Katana ×2–×4 vs Endermen; Spider Sword → Sting ×2–×4 vs Arthropods; Undead Sword → Axe of the Shredded ×2–×3.5 and Undead/Super Undead/Death Bow ×2 vs Undead; Spirit Sword/Shortbow 1 + 2% per 1% missing HP vs Undead; the six Crimson daggers vs Infernal plus Wither or Skeletal; Wither Bow ×2 and Necron's Blade/Hyperion/Valkyrie/Scylla/Astraea ×1.5 vs Wither; Soul Whip ×2 / Flaming Flay ×3 vs sea creatures; Pooch Sword ×2 vs wolves; Sword of Revelations ×1.5 vs Mythological. Endermen, wolves and sea creatures are target tags (not mob types) so e.g. katanas don't boost damage to dragons; enemy presets set them.
-- Enchantments: conflicting pairs (Execute/Prosecute, First Strike/Triple-Strike, Giant Killer/Titan Killer) block each other in the UI. One ultimate per weapon: One For All (+500% additive, greys out and ignores all other enchants), Swarm (per nearby enemy) and Combo (per kill, boosted by Lion's First Pounce) additive, Chimera (copies % of pet stats), Soul Eater (level × last mob's damage as Strength on the crit hit only, max 5,000 outside dungeons), Ultimate Jerry (Aspect of the Jerry base damage). Fatal Tempo, Inferno, Ultimate Wise, Duplex and Rend are selectable but don't change a single hit.
-- God Potion switch (Other stat bonuses): Strength VIII +78.75, Critical IV +25 Crit Chance / +40 Crit Damage, Spirit IV +40 Crit Damage, Archery IV +80% additive bow damage (wiki God Potion Effect values, brew boosts included).
-- Anvil books: Hot Potato Books (0–10) and Fuming Potato Books (0–5, after 10 HPB) on weapons (+2 Damage, +2 Strength each) and armor (+4 Health, +2 Defense each); The Art of War (+5 Strength) on weapons.
-- Midas' Sword: "Bought for" price sets the Greed bonus (+Damage and +Strength, wiki brackets; 50M cap, 250M for the fragged sword). Gilded reforge is offered only on Midas' Sword/Staff (Legendary 75, Mythic 90 Damage and Strength).
-- In dungeon (top of the Target section, with a Master Mode option; dungeon enemy presets switch it on): dungeon items get the Catacombs-level boost (wiki Dungeoneering table: +10% at level 0 up to +485% at 50, multiplicative) on top of in-dungeon star bonuses. The Catacombs level is capped at 50 (levels past 50 are cosmetic), including for Withered/Ancient per-level bonuses. Number fields clamp to their min/max.
-- Dungeon class (shown with the In dungeon switch; only counts in dungeons): class + level (0–50). Berserk +40% melee damage +0.75%/level (+77.5% at 50) and Archer +150% arrow damage +1.6%/level (+230% at 50), both multiplicative; "No dupes" (no one else on the team has your class) doubles it. Healer, Mage and Tank have no passive that changes a melee or bow hit.
-- Dungeonized gear: items the API lists with a dungeon conversion cost (159 weapons and armor pieces, e.g. Terminator, Arachne and Perfect armor) get a "Dungeonized" checkbox. A dungeonized item counts as a Dungeon Item: +10%/star and master stars in dungeons, plus the Catacombs boost. Outside dungeons it still gets +2%/star like any starred item.
-- Stars: weapon, armor and equipment, up to the item's upgrade count from the API (dungeon items: 5 + 5 master stars). +2% base item stats per star anywhere; dungeon items get +10% per star in dungeons instead, and master stars +5% each only in Master Mode. Choose the location under Other bonuses.
-- Dungeon drops (dungeon items with a 10-step `tiered_stats` table, e.g. Silent Death, Zombie Soldier Cutlass, Skeleton Master armor): "Dropped floor" picks the base stats (tier 1–7 = Floor I–VII, tier 4–10 = Master Mode I–VII) and "Quality" (0–50%) multiplies them; a 50% roll raises the rarity by one, which also affects reforge and gem values.
-- Item tiers: other items with `tiered_stats` in the API get a stat-tier picker; David's Cloak gets a milestone picker (I–XXX) that sets its stats and rarity (Common → Mythic). Add more milestone items to `PROGRESSION_ITEMS` in `mechanics.js`.
-- Pets: stats, ability numbers and ability text come from the NotEnoughUpdates repo (`constants/petnums.json`, `items/<PET>;<rarity>.json`), because Hypixel's API has no pet data; pet item names come from the Hypixel API. Stats are interpolated linearly from level 1 to 100 (Golden/Jade/Rose Dragon: 101–200). Damage-relevant abilities are matched by their lore text in `src/data/pets.js` (End Strike, Superior, Legendary Treasure, Dragon's Greed, Primal Force, First Pounce, Blood Scent, Apex Predator, Close Combat, Tyrant, Sacred Strength, Last Stand, Bone Arrows, Wither Blood, Rotten Blade, Spiky Quills, Kuudra Specialist and weapon buffs). Pet items with damage effects: claws, teeth, remedies, relics, Spooky Cupcake, Tier Boost.
-- Fight location follows the enemy: outside enemies lock "Outside dungeons"; normal-floor bosses (F1–F7) lock Catacombs; Master Mode bosses and the M7 Wither Dragons lock Master Mode; regular dungeon mobs and dungeon minibosses are always in a dungeon but let you pick Catacombs or Master Mode. Only "Custom target" has a free In dungeon switch.
-- Enemies: slayer bosses and minibosses, dungeon floor bosses (F and M), dragons, Crimson Isle bosses, Arachne, Inquisitor, Jawbus and more. Choosing one fills the target fields; editing them switches back to "Custom target".
-
-## Game data
-
-All constants live in `src/data/mechanics.js`, sourced from hypixelskyblock.minecraft.wiki (Oct 2026):
-
-- Power stat multiplier: `29.97 × ln(0.0019·MP + 1)^1.2`; stone power stats are stored as their 250-MP wiki values ÷ 9.64.
-- Tuning: 1 point per 10 MP.
-- Ruler attributes: +3%/level vs mob type; Echo of Ruler and Echo of Echoes amplify them (max +39%).
-
-Known gaps — verify against the game and edit `mechanics.js` if needed:
-
-- The wiki's Damage Calculation page is marked outdated for the 0.26.1 stat changes. Sharpness/Smite/etc. use the page's current table (V–VII = 30/40/50%); older versions used 30/45/65%.
-- Per-point tuning values, Fabled/Withered reforge numbers, and treating Warrior/Dominance/Deadeye/Lifeline/Payback shards as additive are from community knowledge, not a confirmed source.
-- Dungeon item quality is applied to base stats outside dungeons too and stacks multiplicatively with stars; the wiki doesn't spell out either point. The Catacombs-level boost multiplies the item's base stats (like stars), not reforges, gems or potato books; the wiki doesn't say which stats it covers. Dungeon blessings and dungeon mob resistances aren't modeled. Archer's level-0 base (150%) is derived from the wiki's level-50 total; the solo ×2 comes from the Classes page and isn't confirmed per passive. Archer's multiplicative treatment is assumed by analogy with Berserk. Lust for Blood (per-hit stacking) and Mage Staff aren't modeled.
-- Pooch Sword: the wiki's description says +200% vs wolves but its implementation table uses ×2; ×2 is used. Shaman Sword's bonus is ×1 in that table and is left out. Daedalus Blade (per Bestiary tier, unconfirmed) and Ice Spray (ability) aren't included.
-- Midas Staff's price only affects ability damage, which this melee/bow calculator doesn't use. Gilded below Legendary isn't listed on the wiki; Legendary values are used. Potato books and Art of War aren't scaled by stars.
-- Stars scale the item's base stats only, not reforges or gems. The wiki doesn't state the outside-dungeon bonus for dungeon items explicitly; +2% per normal star is assumed. Crimson/Kuudra stars 11–15 use the same +2%.
-- David's Cloak per-milestone stats follow the wiki's milestone table (Strength/Health/Foraging Fortune +1 → +3 per milestone, totals match the wiki's +50).
-- Gem tables have no Divine column on the wiki, so Divine reuses Mythic. The wiki's Flawless Onyx row is lower than Fine at low rarities; kept as printed.
-- Enemy presets were re-checked against each mob's wiki page (Oct 2026). Defense is 0 where the wiki lists none; Kuudra HP and Wither Dragon mob types aren't listed. Floor boss HP: the wiki gives one range per boss; low end = normal floor, high end = Master Mode (stated for Bonzo, Scarf and The Professor, assumed for Livid, Sadan and the F7 bosses). Regular dungeon mobs show their HP range (it depends on the floor) and leave Target max HP for you to fill in. Thorn (4–6 "hits" of health) and Spirit Bear aren't listed.
-- Reforge special effects that depend on situation (Fabled crit bonus, Precise/Headstrong head hits, Fanged 7th hit) aren't applied; add them as bonus rows.
-- Pet abilities other than Hedgehog's are treated as additive damage; the wiki only confirms this for Golden and Ender Dragon. Stacking or position-based abilities (Skeleton combo, Wolf pack, Pigman level bonus, Ankylosaurus) aren't modeled.
-- Set bonuses (`src/data/sets.js`, wiki values Oct 2026): Kuudra sets use the lowest tier worn; Crimson Dominus adds damage only at Infernal; Aurora, Hollow, Fervor, Witherborn and Molten are detected but don't change a single hit. Terror Hydra Strike, skeleton arrow-damage, Tarantula 4th strike, Final Destination and Shadow Assassin Cloak bonuses are treated as additive (the wiki only states it for Dominus and the Tuxedos). Mastiff uses the Defense the calculator knows about (gear base stats), not your full in-game Defense. Not modeled: Thunder/Magma Lord fishing sets, Final Destination and Tarantula kill-based Defense bulwarks, Superior Dragon's AOTD ability bonus.
-- Equipment reforges aren't modeled; enter them as bonus rows.
+All text uses a Minecraft-style pixel font, `public/fonts/marlowww.otf`. It was converted (ASCII glyphs only) from the font textures of the MIT-licensed resource pack [Marlowww Texture pack PVP & More](https://modrinth.com/resourcepack/totem-of-marlowww) by btwreynahd; the license notice is in `public/fonts/LICENSE-marlowww.txt`.
