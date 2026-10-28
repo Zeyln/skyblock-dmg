@@ -1,6 +1,7 @@
 import { loadItems, loadPets, loadPetLore, ARMOR_SLOTS } from './api.js';
 import { h } from './dom.js';
 import { combo } from './combo.js';
+import './sculk.js'; // dark-theme sculk strips (sets --sculk-* CSS variables)
 import { parseFormatting } from './mctext.js';
 import { detectSets, evaluateSets } from './data/sets.js';
 import {

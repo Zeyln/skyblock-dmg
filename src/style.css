@@ -162,16 +162,24 @@ h3:first-child { margin-top: 0; }
 .topbar-row { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 10px 16px; }
 .brand { display: flex; align-items: center; gap: 10px; }
 /* Theme switch: a flat grass block (green top, brown bottom). Clicking it flips the block 180°
-   and toggles the dark theme; it stays flipped while the dark theme is on. */
+   and toggles the dark theme; while flipping, green turns to deepslate grey and brown to sculk
+   teal, so the dark theme shows an upright sculk block. --logo-a is the half that starts on top,
+   --logo-b the half that starts at the bottom. */
 .logo {
+  --logo-a: #0ca528;   /* grass */
+  --logo-b: #6b3d14;   /* dirt */
   flex: none; width: 22px; height: 22px; padding: 0; border: 0; cursor: pointer;
-  background: #0ca528;
-  box-shadow: inset 0 -12px 0 #6b3d14 !important;
-  transition: transform .5s cubic-bezier(.5, 0, .2, 1);
+  background: var(--logo-a);
+  box-shadow: inset 0 -12px 0 var(--logo-b) !important;
+  transition: transform .5s cubic-bezier(.5, 0, .2, 1), background-color .5s ease, box-shadow .5s ease;
 }
 /* Focus ring drawn inside: the pixel-corner clip-path would cut off an outline. */
-.logo:focus-visible { outline: none; box-shadow: inset 0 -12px 0 #6b3d14, inset 0 0 0 var(--px) var(--accent-ink) !important; }
-:root[data-theme="dark"] .logo { transform: rotate(180deg); }
+.logo:focus-visible { outline: none; box-shadow: inset 0 -12px 0 var(--logo-b), inset 0 0 0 var(--px) var(--accent-ink) !important; }
+:root[data-theme="dark"] .logo {
+  --logo-a: #3e4049;   /* deepslate */
+  --logo-b: #0f6e78;   /* sculk */
+  transform: rotate(180deg);
+}
 @media (prefers-reduced-motion: reduce) { .logo { transition: none; } }
 /* Theme change: the page cross-fades between the two palettes (view transition, main.js).
    The logo is left out of the fade so its flip plays live instead of ghosting. */
@@ -267,7 +275,70 @@ h3:first-child { margin-top: 0; }
   padding: 14px 18px; border-radius: var(--radius); user-select: none;
 }
 .panel > summary::-webkit-details-marker { display: none; }
-.panel > summary:hover { background: var(--inset); }
+/* Header hover tint: a layer under the header, not the header's own background, so that it
+   - follows the panel's stepped inner corners instead of painting over the outline pixels, and
+   - stays below decorations drawn under the panel content (z-index -2 vs -1, inside the
+     panel's stacking context, which its clip-path creates).
+   Its corners are cut one pixel-step deep, matching the inside of the panel's three-step frame;
+   when the panel is open only the top corners touch the frame. */
+.panel > summary { position: relative; }
+.panel > summary::before {
+  content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+  --s: var(--px); --s2: calc(var(--px) * 2);
+  clip-path: polygon(
+    0 var(--s2), var(--s) var(--s2), var(--s) var(--s), var(--s2) var(--s), var(--s2) 0,
+    calc(100% - var(--s2)) 0, calc(100% - var(--s2)) var(--s), calc(100% - var(--s)) var(--s), calc(100% - var(--s)) var(--s2), 100% var(--s2),
+    100% calc(100% - var(--s2)), calc(100% - var(--s)) calc(100% - var(--s2)), calc(100% - var(--s)) calc(100% - var(--s)),
+    calc(100% - var(--s2)) calc(100% - var(--s)), calc(100% - var(--s2)) 100%,
+    var(--s2) 100%, var(--s2) calc(100% - var(--s)), var(--s) calc(100% - var(--s)), var(--s) calc(100% - var(--s2)), 0 calc(100% - var(--s2)));
+}
+.panel[open] > summary::before {
+  clip-path: polygon(
+    0 var(--s2), var(--s) var(--s2), var(--s) var(--s), var(--s2) var(--s), var(--s2) 0,
+    calc(100% - var(--s2)) 0, calc(100% - var(--s2)) var(--s), calc(100% - var(--s)) var(--s), calc(100% - var(--s)) var(--s2), 100% var(--s2),
+    100% 100%, 0 100%);
+}
+.panel > summary:hover::before { background: var(--inset); }
+
+/* Dark theme: sculk growing over the top edge of every panel, card and the damage panel.
+   The growth is a ::before layer along the top. sculk.js draws four long random strips
+   (--sculk-1 … --sculk-4, 1280 x 28 px): a crust over the top outline, uneven drips and loose
+   spores that thin out and fade further down. Each panel takes one strip at its own offset.
+   The layer sits under the panel's text (z-index -1 inside the panel's own stacking context,
+   which its clip-path creates; the header hover tint is below it at -2) and the stepped
+   clip-path trims it at the corners. */
+:root[data-theme="dark"] :is(.panel, .card) { position: relative; }
+:root[data-theme="dark"] :is(.panel, .card, .hero-panel)::before {
+  content: '';
+  /* Offsets cover the panel's 2px border too (absolute positions start inside it). */
+  position: absolute; z-index: -1; left: calc(var(--px) * -1); right: calc(var(--px) * -1); top: calc(var(--px) * -1);
+  height: 28px;
+  pointer-events: none;
+  background: var(--sculk-1) 0 0 / 1280px 28px repeat-x;
+}
+:root[data-theme="dark"] :is(.panel, .card):nth-child(4n + 2)::before { background-image: var(--sculk-2); background-position: -310px 0; }
+:root[data-theme="dark"] :is(.panel, .card):nth-child(4n + 3)::before { background-image: var(--sculk-3); background-position: -620px 0; }
+:root[data-theme="dark"] :is(.panel, .card):nth-child(4n + 4)::before { background-image: var(--sculk-4); background-position: -150px 0; }
+:root[data-theme="dark"] .hero-panel::before { background-image: var(--sculk-3); background-position: -900px 0; }
+/* Sculk-sensor sparkles: a second layer just above the sculk (same z-index, later in order).
+   The strips from sculk.js animate every sparkle on its own (blink, then reappear nearby);
+   panels only pick different strips and offsets. Reduced motion uses still copies. */
+:root[data-theme="dark"] :is(.panel, .card, .hero-panel)::after {
+  content: '';
+  position: absolute; z-index: -1; left: calc(var(--px) * -1); right: calc(var(--px) * -1); top: calc(var(--px) * -1);
+  height: 6px;
+  pointer-events: none;
+  background: var(--sparks-1) 0 0 / 1280px 6px repeat-x;
+}
+:root[data-theme="dark"] :is(.panel, .card):nth-child(3n + 2)::after { background-image: var(--sparks-2); background-position: -400px 0; }
+:root[data-theme="dark"] :is(.panel, .card):nth-child(3n + 3)::after { background-image: var(--sparks-3); background-position: -820px 0; }
+:root[data-theme="dark"] .hero-panel::after { background-image: var(--sparks-2); background-position: -640px 0; }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="dark"] :is(.panel, .card, .hero-panel)::after { background-image: var(--sparks-still-1); }
+  :root[data-theme="dark"] :is(.panel, .card):nth-child(3n + 2)::after, :root[data-theme="dark"] .hero-panel::after { background-image: var(--sparks-still-2); }
+  :root[data-theme="dark"] :is(.panel, .card):nth-child(3n + 3)::after { background-image: var(--sparks-still-3); }
+}
+
 .panel-title { font-weight: 650; font-size: 15px; white-space: nowrap; }
 .panel-summary {
   color: var(--muted); font-size: 12.5px; flex: 1; min-width: 0;
