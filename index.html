@@ -8,12 +8,19 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      // Apply the saved (or system) theme before the first paint so dark mode never flashes light.
+      try {
+        const t = localStorage.getItem('dpscalc.theme');
+        if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.dataset.theme = 'dark';
+      } catch {}
+    </script>
   </head>
   <body>
     <header id="topbar" class="topbar glass">
       <div class="topbar-row">
         <div class="brand">
-          <span class="logo" aria-hidden="true"></span>
+          <button type="button" id="theme-toggle" class="logo" aria-label="Dark theme" aria-pressed="false" title="Switch theme"></button>
           <h1>SkyBlock - DPS Calculator</h1>
         </div>
         <div id="nav" class="nav" aria-label="Sections"></div>

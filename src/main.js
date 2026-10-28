@@ -1231,6 +1231,33 @@ function trackResultsOverflow() {
   set();
 }
 
+// ---------- theme ----------
+// The logo switches between the light and dark theme. index.html applies the saved (or system)
+// theme before the first paint; this wires up the button and saves the choice. The colour change
+// cross-fades through a view transition while the logo flips (CSS), where the browser supports it.
+const THEME_KEY = 'dpscalc.theme';
+function initThemeToggle() {
+  const btn = document.getElementById('theme-toggle');
+  const root = document.documentElement;
+  const isDark = () => root.dataset.theme === 'dark';
+  const paint = () => {
+    btn.setAttribute('aria-pressed', String(isDark()));
+    btn.title = isDark() ? 'Switch to light theme' : 'Switch to dark theme';
+  };
+  const apply = (dark) => {
+    if (dark) root.dataset.theme = 'dark'; else delete root.dataset.theme;
+    paint();
+  };
+  btn.addEventListener('click', () => {
+    const dark = !isDark();
+    try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch { /* private mode */ }
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (document.startViewTransition && !reduced) document.startViewTransition(() => apply(dark));
+    else apply(dark);
+  });
+  paint();
+}
+
 // ---------- boot ----------
 async function boot(force = false) {
   const status = document.getElementById('api-status');
@@ -1265,4 +1292,5 @@ form.addEventListener('change', onFormInput);
 form.addEventListener('submit', (e) => e.preventDefault());
 trackHeaderHeight();
 trackResultsOverflow();
+initThemeToggle();
 boot();

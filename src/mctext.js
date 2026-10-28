@@ -1,18 +1,15 @@
 // Minecraft "§" formatting codes -> styled text.
 // §0-§f set a colour (and reset styles, as in-game), §l bold, §o italic, §n underline,
-// §m strikethrough, §k obfuscated, §r reset. Colours are the in-game palette, darkened where the
-// original (white, yellow, aqua…) would be unreadable on the light theme.
+// §m strikethrough, §k obfuscated, §r reset. Colours are CSS variables (--mc-0 … --mc-f in
+// style.css) so each theme can use a readable version of the in-game palette.
 import { h } from './dom.js';
 
-export const MC_COLORS = {
-  0: '#1d2233', 1: '#1f2fa8', 2: '#1e7a2e', 3: '#127c8a', 4: '#a8201a', 5: '#8c35b8', 6: '#c28a00', 7: '#7b7f8c',
-  8: '#5c6070', 9: '#3d55e0', a: '#1e8f3a', b: '#1a9fb0', c: '#d33a3a', d: '#c4309f', e: '#b39200', f: '#7b7f8c',
-};
+export const MC_COLORS = Object.fromEntries([...'0123456789abcdef'].map((c) => [c, `var(--mc-${c})`]));
 
 export const hasFormatting = (s) => /§[0-9a-fk-or]/i.test(s || '');
 export const stripFormatting = (s) => String(s ?? '').replace(/§[0-9a-fk-or]/gi, '');
 
-// "§4Sin§5seeker" -> [{ text: 'Sin', color: '#a8201a' }, { text: 'seeker', color: '#8c35b8' }]
+// "§4Sin§5seeker" -> [{ text: 'Sin', color: 'var(--mc-4)' }, { text: 'seeker', color: 'var(--mc-5)' }]
 export function parseFormatting(s) {
   const segs = [];
   let style = {};

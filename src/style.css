@@ -27,13 +27,88 @@
   --accent-ink: #4343b8;
   --accent-soft: rgba(91, 91, 214, .12);
   --crit: #e5484d;
+  --crit-ink: #c3363b;
+  --crit-soft: rgba(229, 72, 77, .12);
   --good: #12a594;
+  --good-ink: #0b7a6e;
+  --good-soft: rgba(18, 165, 148, .14);
+  --good-line: #a3d8d4;
   --warn: #c2620e;
+  --on-accent: #ffffff;     /* text on accent / danger buttons */
+  --field-focus: #ffffff;
+  --hover-border: #b5b5ed;
+  --chip: rgba(110, 120, 160, .12);
+  --mark: rgba(245, 165, 36, .3);   /* search match highlight */
+  --backdrop: rgba(40, 46, 80, .35);
+  --bevel-dark: rgba(60, 70, 140, .16);   /* pressed-button shade */
+  --wall-mix: 22%;                        /* button depth wall: outline colour darkened by this much */
+  --button-face: #ffffff;                 /* face of pressable buttons */
+  --danger-hover: #d13a3f;
+  --scroll-thumb: rgba(95, 105, 150, .32);
+  --scroll-thumb-hover: rgba(91, 91, 214, .55);
+  /* Rarity, gem and star colours: the in-game colours, darkened to read on the light theme. */
+  --tier-common: #7b7f8c; --tier-uncommon: #1e8f3a; --tier-rare: #2f63d1; --tier-epic: #8c35b8;
+  --tier-legendary: #c28a00; --tier-mythic: #c4309f; --tier-special: #c43f3f; --tier-divine: #1aa3b3;
+  --gem-ruby: #d33a3a; --gem-amethyst: #8c35b8; --gem-sapphire: #2f8fd1;
+  --gem-jasper: #c4309f; --gem-onyx: #3b3f4a; --gem-opal: #8d95ab;
+  --star-gold: #d6a100; --star-pink: #c4309f; --star-aqua: #1a9fb0;
+  /* Minecraft § colour codes (used by mctext.js). */
+  --mc-0: #1d2233; --mc-1: #1f2fa8; --mc-2: #1e7a2e; --mc-3: #127c8a; --mc-4: #a8201a; --mc-5: #8c35b8;
+  --mc-6: #c28a00; --mc-7: #7b7f8c; --mc-8: #5c6070; --mc-9: #3d55e0; --mc-a: #1e8f3a; --mc-b: #1a9fb0;
+  --mc-c: #d33a3a; --mc-d: #c4309f; --mc-e: #b39200; --mc-f: #7b7f8c;
   --radius: 16px;
   --radius-sm: 10px;
   font-family: var(--font-mc);
   font-synthesis: none;          /* the pixel font has a single weight; no faux bold/italic */
   color-scheme: light;
+}
+
+/* Dark theme: set by the logo switch (main.js) or, until it is used, the system preference
+   (inline script in index.html). Rarity and § colours move back towards their bright in-game
+   values. */
+:root[data-theme="dark"] {
+  --text: #e4e7ef;
+  --muted: #a3aac0;
+  --faint: #7d849b;
+  --page: #14161c;
+  --line: #2a2e39;
+  --line-strong: #3a3f4d;
+  --glass: #1c1f26;
+  --glass-strong: #1c1f26;
+  --glass-border: #333846;
+  --field: #171a20;
+  --inset: #22252e;
+  --accent: #7c7cf0;
+  --accent-ink: #a9a9ff;
+  --accent-soft: rgba(124, 124, 240, .18);
+  --crit: #ff5c63;
+  --crit-ink: #ff7d82;
+  --crit-soft: rgba(255, 92, 99, .15);
+  --good: #36d1bb;
+  --good-ink: #4fe0cb;
+  --good-soft: rgba(54, 209, 187, .14);
+  --good-line: #2a6a70;
+  --warn: #f0a050;
+  --field-focus: #1b1e25;
+  --hover-border: #4f5092;
+  --chip: rgba(160, 170, 210, .12);
+  --mark: rgba(255, 210, 90, .16);
+  --backdrop: rgba(0, 0, 0, .55);
+  --bevel-dark: rgba(0, 0, 0, .4);
+  --wall-mix: 8%;
+  --button-face: #262a34;
+  --danger-hover: #ff474f;
+  --scroll-thumb: rgba(160, 170, 210, .25);
+  --scroll-thumb-hover: rgba(124, 124, 240, .6);
+  --tier-common: #c4c8d2; --tier-uncommon: #55e06a; --tier-rare: #6b8cff; --tier-epic: #c26bf2;
+  --tier-legendary: #ffc23a; --tier-mythic: #ff6bd8; --tier-special: #ff6b6b; --tier-divine: #4fe3f0;
+  --gem-ruby: #ff6b6b; --gem-amethyst: #c26bf2; --gem-sapphire: #5cb0ff;
+  --gem-jasper: #ff6bd8; --gem-onyx: #a0a4b0; --gem-opal: #e4e7ef;
+  --star-gold: #ffc23a; --star-pink: #ff6bd8; --star-aqua: #4fe3f0;
+  --mc-0: #8a8f9e; --mc-1: #6070ff; --mc-2: #2fbf3f; --mc-3: #22b8b8; --mc-4: #d9473c; --mc-5: #c050c0;
+  --mc-6: #ffaa00; --mc-7: #aaaaaa; --mc-8: #7a7e8a; --mc-9: #7b7bff; --mc-a: #55ff55; --mc-b: #55ffff;
+  --mc-c: #ff5555; --mc-d: #ff55ff; --mc-e: #ffff55; --mc-f: #f2f2f2;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { scroll-padding-top: calc(var(--header-h, 52px) + var(--gap, 16px) * 2); }
@@ -47,17 +122,17 @@ body {
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(95, 105, 150, .32); border-radius: 999px;
+  background: var(--scroll-thumb); border-radius: 999px;
   border: 3px solid transparent; background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: rgba(91, 91, 214, .55); }
-::-webkit-scrollbar-thumb:active { background-color: rgba(91, 91, 214, .75); }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+::-webkit-scrollbar-thumb:active { background-color: var(--accent); }
 ::-webkit-scrollbar-corner { background: transparent; }
 /* Inner scroll areas (results column, tables) get a slimmer bar. */
 .results::-webkit-scrollbar, .table-scroll::-webkit-scrollbar, .formula::-webkit-scrollbar { width: 8px; height: 8px; }
 .results::-webkit-scrollbar-thumb, .table-scroll::-webkit-scrollbar-thumb, .formula::-webkit-scrollbar-thumb { border-width: 2px; }
 @supports (-moz-appearance: none) {
-  * { scrollbar-width: thin; scrollbar-color: rgba(95, 105, 150, .4) transparent; }
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
 }
 
 h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
@@ -69,7 +144,7 @@ h3:first-child { margin-top: 0; }
 
 /* Solid surface (class name kept from the old glass theme). */
 .glass {
-  background: var(--glass);
+  --face: var(--glass); background: var(--glass);
   --bc: var(--glass-border); border: 2px solid var(--bc);
 }
 
@@ -86,19 +161,33 @@ h3:first-child { margin-top: 0; }
 }
 .topbar-row { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 10px 16px; }
 .brand { display: flex; align-items: center; gap: 10px; }
-/* Flat grass block: green top, brown bottom (same colours as before, no gradient). */
+/* Theme switch: a flat grass block (green top, brown bottom). Clicking it flips the block 180°
+   and toggles the dark theme; it stays flipped while the dark theme is on. */
 .logo {
-  width: 22px; height: 22px; border-radius: 7px;
+  flex: none; width: 22px; height: 22px; padding: 0; border: 0; cursor: pointer;
   background: #0ca528;
-  box-shadow: inset 0 -12px 0 #6b3d14;
+  box-shadow: inset 0 -12px 0 #6b3d14 !important;
+  transition: transform .5s cubic-bezier(.5, 0, .2, 1);
 }
+/* Focus ring drawn inside: the pixel-corner clip-path would cut off an outline. */
+.logo:focus-visible { outline: none; box-shadow: inset 0 -12px 0 #6b3d14, inset 0 0 0 var(--px) var(--accent-ink) !important; }
+:root[data-theme="dark"] .logo { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .logo { transition: none; } }
+/* Theme change: the page cross-fades between the two palettes (view transition, main.js).
+   The logo is left out of the fade so its flip plays live instead of ghosting. */
+.logo { view-transition-name: theme-logo; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .5s; animation-timing-function: ease; }
+::view-transition-old(theme-logo) { display: none; }
+::view-transition-new(theme-logo), ::view-transition-group(theme-logo) { animation: none; }
 /* Expand / Collapse all — pushed to the right of the title. */
 .nav { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+/* Text-style buttons in the header: no visible outline until hovered or focused. The face is the
+   header colour, not transparent, because the outline colour is painted underneath it. */
 .nav button {
-  flex: none; --bc: transparent; border: var(--px) solid var(--bc); background: transparent; color: var(--muted); white-space: nowrap;
+  flex: none; --bc: transparent; border: var(--px) solid var(--bc); --face: var(--glass); background: var(--glass); color: var(--muted); white-space: nowrap;
   padding: 5px 10px; font-size: 12.5px; font-weight: 500;
 }
-.nav button:hover { background: var(--glass-strong); color: var(--text); --bc: var(--line); }
+.nav button:hover { --face: var(--glass-strong); background: var(--glass-strong); color: var(--text); --bc: var(--line); }
 .api-status { color: var(--muted); font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .api-status.error { color: var(--crit); }
 
@@ -117,7 +206,7 @@ h3:first-child { margin-top: 0; }
 .hero-panel {
   position: fixed; top: var(--gap); right: var(--gutter); z-index: 30; width: var(--side-w);
   padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px;
-  background: var(--glass-strong); border-width: 2px;
+  --face: var(--glass-strong); background: var(--glass-strong); border-width: 2px;
 }
 .hero-panel:empty { display: none; }
 .hero-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -201,7 +290,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .panel[open] > .panel-body { padding-top: 14px; }
 
 /* nested sub-panels (slot upgrades, enchant groups, shard groups) */
-.sub { --bc: var(--line); border: var(--px) solid var(--bc); border-radius: var(--radius-sm); background: var(--inset); margin-top: 10px; }
+.sub { --bc: var(--line); border: var(--px) solid var(--bc); border-radius: var(--radius-sm); --face: var(--inset); background: var(--inset); margin-top: 10px; }
 .sub > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; font-size: 13px; font-weight: 600; color: var(--text);
@@ -217,7 +306,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
   padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink);
   font-size: 11px; font-weight: 600;
 }
-.count.zero { background: rgba(110, 120, 160, .1); color: var(--faint); }
+.count.zero { background: var(--chip); color: var(--faint); }
 
 /* ---------- form controls ---------- */
 .grid { display: grid; gap: 10px 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -226,19 +315,20 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .field-label { display: block; }
 label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
 input, select, button {
-  font: inherit; color: var(--text); background: var(--field);
+  font: inherit; color: var(--text); --face: var(--field); background: var(--field);
   --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: var(--radius-sm); padding: 7px 10px; min-width: 0;
-  transition: border-color .12s, box-shadow .12s, background .12s;
 }
-input:focus, select:focus { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: #fff; }
+input:focus, select:focus { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); --face: var(--field-focus); background: var(--field-focus); }
 input[type=number] { width: 100%; }
 input[type=checkbox], input[type=radio] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
 select:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
-button { cursor: pointer; font-weight: 500; }
+button { cursor: pointer; font-weight: 500; --face: var(--button-face); }
 button:focus-visible { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-button:hover { --bc: var(--accent); color: var(--accent-ink); }
-button.primary { background: var(--accent); color: #fff; --bc: var(--accent); }
-button.ghost { background: transparent; }
+button:hover { color: var(--accent-ink); }
+button.primary { --face: var(--accent); background: var(--accent); color: var(--on-accent); --bc: var(--accent); }
+/* Outlined button on the page background. The face must be solid (the outline colour is painted
+   underneath it), so it uses the page colour rather than transparent. */
+button.ghost { --face: var(--page); background: var(--page); }
 button.link { --bc: transparent; border: none; background: none; color: var(--faint); padding: 2px 6px; }
 button.link:hover { color: var(--crit); }
 
@@ -265,43 +355,42 @@ button.link:hover { color: var(--crit); }
 }
 
 .tier { font-weight: 600; }
-.tier-COMMON { color: #7b7f8c; } .tier-UNCOMMON { color: #1e8f3a; } .tier-RARE { color: #2f63d1; }
-.tier-EPIC { color: #8c35b8; } .tier-LEGENDARY { color: #c28a00; } .tier-MYTHIC { color: #c4309f; }
-.tier-SPECIAL, .tier-VERY_SPECIAL { color: #c43f3f; } .tier-DIVINE { color: #1aa3b3; }
+.tier-COMMON { color: var(--tier-common); } .tier-UNCOMMON { color: var(--tier-uncommon); } .tier-RARE { color: var(--tier-rare); }
+.tier-EPIC { color: var(--tier-epic); } .tier-LEGENDARY { color: var(--tier-legendary); } .tier-MYTHIC { color: var(--tier-mythic); }
+.tier-SPECIAL, .tier-VERY_SPECIAL { color: var(--tier-special); } .tier-DIVINE { color: var(--tier-divine); }
 
 .grid.disabled { opacity: .4; pointer-events: none; }
 .conflict { color: var(--crit); font-size: 11px; }
 .mobs { display: flex; flex-wrap: wrap; gap: 6px; }
 .mobs label {
   --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: 999px; padding: 4px 11px; cursor: pointer;
-  user-select: none; font-size: 12.5px; background: var(--inset);
+  user-select: none; font-size: 12.5px; --face: var(--inset); background: var(--inset);
 }
 .mobs input { display: none; }
-.mobs label:hover { --bc: var(--accent); }
-.mobs label:has(input:checked) { background: var(--accent); --bc: var(--accent); color: #fff; }
+.mobs label:has(input:checked) { --face: var(--accent); background: var(--accent); --bc: var(--accent); color: var(--on-accent); }
 
 /* fight location strip */
 .location {
   display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 14px;
-  border-radius: var(--radius-sm); background: var(--inset); --bc: var(--line); border: var(--px) solid var(--bc); margin: 12px 0 14px;
+  border-radius: var(--radius-sm); --face: var(--inset); background: var(--inset); --bc: var(--line); border: var(--px) solid var(--bc); margin: 12px 0 14px;
 }
 .location .badge {
   padding: 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
-  background: rgba(110, 120, 160, .12); color: var(--muted);
+  background: var(--chip); color: var(--muted);
 }
-.location .badge.dungeon { background: rgba(91, 91, 214, .14); color: var(--accent-ink); }
-.location .badge.master { background: rgba(229, 72, 77, .12); color: #c3363b; }
+.location .badge.dungeon { background: var(--accent-soft); color: var(--accent-ink); }
+.location .badge.master { background: var(--crit-soft); color: var(--crit-ink); }
 .location .hint { flex-basis: 100%; margin: 0; }
 .location .class-row { flex-basis: 100%; }
-.segmented { display: inline-flex; padding: 3px; border-radius: 999px; background: rgba(110, 120, 160, .12); }
+.segmented { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--chip); }
 .segmented label { padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .segmented input { display: none; }
-.segmented label:has(input:checked) { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(60, 70, 140, .15); }
+.segmented label:has(input:checked) { background: var(--glass-strong); color: var(--text); box-shadow: 0 1px 3px var(--bevel-dark); }
 
 .pet-lore { margin-top: 12px; font-size: 12px; line-height: 1.55; color: var(--muted); }
 .pet-lore .ability { color: var(--text); font-weight: 600; margin-top: 8px; }
-.tag { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; margin-left: 6px; background: rgba(110, 120, 160, .12); color: var(--faint); }
-.tag.on { color: #0b7a6e; background: rgba(18, 165, 148, .14); }
+.tag { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; margin-left: 6px; background: var(--chip); color: var(--faint); }
+.tag.on { color: var(--good-ink); background: var(--good-soft); }
 
 table.rows { width: 100%; border-collapse: collapse; }
 table.rows th { text-align: left; font-weight: 600; color: var(--faint); font-size: 11px; padding: 4px; text-transform: uppercase; letter-spacing: .05em; }
@@ -326,7 +415,7 @@ table.rows input { width: 100%; }
 .stat-tiles b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
 .stat-tiles span { font-size: 11px; color: var(--muted); }
 
-.results .sub { background: var(--inset); }
+.results .sub { --face: var(--inset); background: var(--inset); }
 .formula { font-size: 12px; background: var(--inset); border-radius: var(--radius-sm); padding: 10px; line-height: 1.7; overflow-x: auto; }
 .kv { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 .kv td { padding: 4px 0; border-bottom: var(--px) solid var(--line); vertical-align: top; }
@@ -340,12 +429,12 @@ table.rows input { width: 100%; }
 .combo { position: relative; min-width: 0; }
 .combo-btn, .combo-field {
   display: flex; align-items: center; gap: 6px; width: 100%; min-height: 36px; text-align: left;
-  background: var(--field); --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: var(--radius-sm);
+  --face: var(--field); background: var(--field); --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: var(--radius-sm);
   padding: 6px 30px 6px 10px; position: relative; color: var(--text); font-weight: 400;
 }
-.combo-btn:hover, .combo-field:hover { --bc: rgba(91, 91, 214, .45); color: var(--text); }
+.combo-btn:hover, .combo-field:hover { --bc: var(--hover-border); color: var(--text); }
 .combo.is-open .combo-btn, .combo.is-open .combo-field, .combo-field:focus-within, .combo-btn:focus-visible {
-  --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: #fff;
+  --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); --face: var(--field-focus); background: var(--field-focus);
 }
 .combo-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .combo-placeholder { color: var(--faint); }
@@ -385,11 +474,11 @@ table.rows input { width: 100%; }
   /* Above the page content but below the fixed header (20), the strip above it (19) and the
      damage panel (30), so a list scrolls out of sight behind them like the rest of the page. */
   position: fixed; z-index: 15; overflow-y: auto; padding: 6px; border-radius: 14px; width: max-content; scrollbar-gutter: stable;
-  background: #fff;
+  --face: var(--glass-strong); background: var(--glass-strong);
 }
 .combo-group {
   padding: 8px 10px 4px; font-size: 10.5px; font-weight: 700; color: var(--faint);
-  text-transform: uppercase; letter-spacing: .07em; position: sticky; top: -6px; background: #fff;
+  text-transform: uppercase; letter-spacing: .07em; position: sticky; top: -6px; background: var(--glass-strong);
 }
 .combo-opt {
   display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 9px; cursor: pointer;
@@ -407,33 +496,33 @@ table.rows input { width: 100%; }
   font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400;
 }
 .combo-empty { padding: 8px 10px; font-size: 12px; color: var(--faint); }
-.combo-opt mark { background: rgba(245, 165, 36, .3); color: inherit; border-radius: 3px; padding: 0 1px; }
+.combo-opt mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
 
 /* in-game markers */
 .star-icons { display: inline-flex; align-items: center; letter-spacing: 1px; font-size: 13px; white-space: nowrap; font-family: 'Segoe UI Symbol', 'Noto Sans Symbols', var(--font-mc); }
-.star-gold { color: #d6a100; }
-.star-pink { color: #c4309f; }  /* §d, stars 6-10 on Crimson Isle gear */
-.star-aqua { color: #1a9fb0; }  /* §b, stars 11-15 */
-.ench-ultimate { color: #c4309f; font-weight: 700; }
+.star-gold { color: var(--star-gold); }
+.star-pink { color: var(--star-pink); }  /* §d, stars 6-10 on Crimson Isle gear */
+.star-aqua { color: var(--star-aqua); }  /* §b, stars 11-15 */
+.ench-ultimate { color: var(--tier-mythic); font-weight: 700; }
 .enemy-boss { font-weight: 600; }
-.gem-RUBY { color: #d33a3a; } .gem-AMETHYST { color: #8c35b8; } .gem-SAPPHIRE { color: #2f8fd1; }
-.gem-JASPER { color: #c4309f; } .gem-ONYX { color: #3b3f4a; } .gem-OPAL { color: #8d95ab; }
+.gem-RUBY { color: var(--gem-ruby); } .gem-AMETHYST { color: var(--gem-amethyst); } .gem-SAPPHIRE { color: var(--gem-sapphire); }
+.gem-JASPER { color: var(--gem-jasper); } .gem-ONYX { color: var(--gem-onyx); } .gem-OPAL { color: var(--gem-opal); }
 
 /* confirmation modal */
 .modal {
   width: min(420px, calc(100vw - 32px)); padding: 22px 22px 18px; border-radius: 20px; color: var(--text);
-  background: var(--glass-strong);
+  --face: var(--glass-strong); background: var(--glass-strong);
 }
-.modal::backdrop { background: rgba(40, 46, 80, .35); }
+.modal::backdrop { background: var(--backdrop); }
 .modal[open] { animation: modal-in .16s ease-out; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
 .modal h2 { font-size: 17px; margin: 0 0 8px; }
 .modal p { margin: 0 0 20px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .modal-actions button { padding: 8px 14px; }
-button.danger { background: var(--crit); --bc: var(--crit); color: #fff; }
-button.danger:hover { background: #d13a3f; color: #fff; --bc: #d13a3f; }
-button.primary:hover { color: #fff; }
+button.danger { --face: var(--crit); background: var(--crit); --bc: var(--crit); color: var(--on-accent); }
+button.danger:hover { --face: var(--danger-hover); background: var(--danger-hover); color: var(--on-accent); --bc: var(--danger-hover); }
+button.primary:hover { color: var(--on-accent); }
 
 
 /* ---------- Minecraft font: used for all text (set on :root) ---------- */
@@ -458,15 +547,15 @@ h1, .panel-title, .card h2, .modal h2,
 .master-star {
   display: inline-grid; place-items: center; flex: none;
   width: 14px; height: 14px; margin-left: 3px; border-radius: 50%;
-  background: var(--mc-red, #d33a3a);
-  color: #fff; font: 9.5px/1 var(--font-mc); letter-spacing: 0;
+  background: var(--mc-c);
+  color: var(--on-accent); font: 9.5px/1 var(--font-mc); letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 /* Set / piece bonus list */
 .set-list { display: flex; flex-direction: column; gap: 6px; }
-.set-row { padding: 8px 10px; border-radius: var(--radius-sm); background: var(--inset); --bc: var(--line); border: var(--px) solid var(--bc); }
-.set-row.on { --bc: rgba(18, 165, 148, .35); }
+.set-row { padding: 8px 10px; border-radius: var(--radius-sm); --face: var(--inset); background: var(--inset); --bc: var(--line); border: var(--px) solid var(--bc); }
+.set-row.on { --bc: var(--good-line); }
 .set-head { display: flex; align-items: center; gap: 6px; }
 .set-name { font-weight: 600; font-size: 13px; }
 .set-head .tag { margin-left: auto; }
@@ -480,17 +569,17 @@ h1, .panel-title, .card h2, .modal h2,
   --px: 2px;                       /* one pixel of the font at UI scale */
   --radius: 0;
   --radius-sm: 0;
-  --bevel-dark: rgba(60, 70, 140, .16);   /* pressed-button shade */
 }
 /* Stepped corners: a 45° staircase of one-pixel (--px) steps, the same on every element.
    --c1..--c3 are the step offsets from the corner; small elements take 2 steps (c2 = c1),
-   large surfaces 3. */
+   large surfaces 3. The bottom edge sits --press above the box bottom (pressable buttons). */
 .notch, .panel, .card, .combo-pop, .modal, .sub, .set-row, .location, .presets, .chain-row, .stat-tiles div,
 input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context span, .badge, .segmented, .segmented label,
 .nav button, .formula, .logo, .topbar, .hero-panel {
   --c1: var(--px);
   --c2: var(--px);
   --c3: calc(var(--px) * 2);
+  --bot: calc(100% - var(--press, 0px));
   border-radius: 0 !important;
   clip-path: polygon(
     /* top-left */
@@ -499,12 +588,12 @@ input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context spa
     calc(100% - var(--c3)) 0, calc(100% - var(--c3)) var(--c1), calc(100% - var(--c2)) var(--c1), calc(100% - var(--c2)) var(--c2),
     calc(100% - var(--c1)) var(--c2), calc(100% - var(--c1)) var(--c3), 100% var(--c3),
     /* bottom-right */
-    100% calc(100% - var(--c3)), calc(100% - var(--c1)) calc(100% - var(--c3)), calc(100% - var(--c1)) calc(100% - var(--c2)),
-    calc(100% - var(--c2)) calc(100% - var(--c2)), calc(100% - var(--c2)) calc(100% - var(--c1)),
-    calc(100% - var(--c3)) calc(100% - var(--c1)), calc(100% - var(--c3)) 100%,
+    100% calc(var(--bot) - var(--c3)), calc(100% - var(--c1)) calc(var(--bot) - var(--c3)), calc(100% - var(--c1)) calc(var(--bot) - var(--c2)),
+    calc(100% - var(--c2)) calc(var(--bot) - var(--c2)), calc(100% - var(--c2)) calc(var(--bot) - var(--c1)),
+    calc(100% - var(--c3)) calc(var(--bot) - var(--c1)), calc(100% - var(--c3)) var(--bot),
     /* bottom-left */
-    var(--c3) 100%, var(--c3) calc(100% - var(--c1)), var(--c2) calc(100% - var(--c1)), var(--c2) calc(100% - var(--c2)),
-    var(--c1) calc(100% - var(--c2)), var(--c1) calc(100% - var(--c3)), 0 calc(100% - var(--c3)));
+    var(--c3) var(--bot), var(--c3) calc(var(--bot) - var(--c1)), var(--c2) calc(var(--bot) - var(--c1)), var(--c2) calc(var(--bot) - var(--c2)),
+    var(--c1) calc(var(--bot) - var(--c2)), var(--c1) calc(var(--bot) - var(--c3)), 0 calc(var(--bot) - var(--c3)));
 }
 /* Bigger surfaces: three steps. */
 .panel, .card, .combo-pop, .modal, .topbar, .hero-panel { --c2: calc(var(--px) * 2); --c3: calc(var(--px) * 3); }
@@ -513,45 +602,72 @@ input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context spa
 /* Checkboxes and radio buttons keep their native shape. */
 input[type=checkbox], input[type=radio] { clip-path: none; }
 
-/* Large surfaces: one crisp 2px border, no bevel or shadow (an inner edge reads as a second panel). */
-.glass, .panel, .card, .modal, .combo-pop {
-  border-width: 2px;
-  box-shadow: none;
-}
-.topbar { box-shadow: none; }
+/* Section headers and nested surfaces: square, no shadows. */
 .panel[open] > summary { border-bottom-width: var(--px); border-radius: 0; }
 .panel > summary, .sub > summary { border-radius: 0; }
+.chain-row, .stat-tiles div, .presets { box-shadow: none; }
 
-/* Nested surfaces: flat, border only. */
-.sub, .set-row, .location, .chain-row, .stat-tiles div, .presets { box-shadow: none; }
-
-/* Fields and buttons: square, 2px borders; focus/hover drawn inside the edge. */
-input, button, .combo-btn, .combo-field { border-width: var(--px); }
-input:focus, select:focus, button:focus-visible,
-.combo.is-open .combo-btn, .combo.is-open .combo-field, .combo-field:focus-within, .combo-btn:focus-visible {
-  box-shadow: inset 0 0 0 var(--px) var(--accent-soft);
-}
-button:not(.link):not(.minor):active { box-shadow: inset var(--px) var(--px) 0 var(--bevel-dark); }
-
-/* Stepped corners on bordered elements: the corner cut removes the border there, so redraw it
-   as a one-pixel diagonal in the border colour (--bc), like a pixel-art outline:
-       ...###      Each corner gets a pixel at (c2, c1) and (c1, c2); on two-step
-       ..#...      corners both are the same pixel.
-       .#....
-       #.....                                                                   */
+/* Framed elements (panels, rows, fields, buttons, chips) are painted as one pixel-art sprite,
+   with no border colour or shadows layered on top:
+   - the background colour is the outline colour (--bc), cut to the stepped shape by clip-path;
+   - the face (--face) covers it as rectangles, each inset one pixel further on one axis, so
+     exactly a one-pixel outline that follows the steps stays visible:
+         ..####      two-step corner (# outline, f face)
+         .#ffff
+         #fffff
+   The CSS border only reserves the outline's space (it is transparent).
+   (--xN, --yN) are the face rectangles' insets in pixels: (1,2) (2,1) for two-step corners,
+   (1,3) (2,2) (3,1) for three-step corners. */
 .glass, .sub, .set-row, .location, .mobs label, .combo-btn, .combo-field,
-input:not([type=checkbox]):not([type=radio]):not(.combo-input), button {
-  --i: linear-gradient(var(--bc), var(--bc));
-  background-image: var(--i), var(--i), var(--i), var(--i), var(--i), var(--i), var(--i), var(--i) !important;
+input:not([type=checkbox]):not([type=radio]):not(.combo-input), button:not(.logo):not(.link) {
+  --x1: 1; --y1: 2; --x2: 2; --y2: 1; --x3: 1; --y3: 2;
+  --f: linear-gradient(var(--face), var(--face));
+  border-color: transparent !important;
+  box-shadow: none !important;
+  background-color: var(--bc) !important;
+  background-image: var(--f), var(--f), var(--f) !important;
   background-repeat: no-repeat !important;
   background-origin: border-box !important;
-  background-size: var(--px) var(--px) !important;
+  background-clip: border-box !important;
   background-position:
-    left var(--c2) top var(--c1), left var(--c1) top var(--c2),
-    right var(--c2) top var(--c1), right var(--c1) top var(--c2),
-    right var(--c2) bottom var(--c1), right var(--c1) bottom var(--c2),
-    left var(--c2) bottom var(--c1), left var(--c1) bottom var(--c2) !important;
+    left calc(var(--x1) * var(--px)) top calc(var(--y1) * var(--px)),
+    left calc(var(--x2) * var(--px)) top calc(var(--y2) * var(--px)),
+    left calc(var(--x3) * var(--px)) top calc(var(--y3) * var(--px)) !important;
+  background-size:
+    calc(100% - var(--x1) * var(--px) * 2) calc(100% - var(--y1) * var(--px) * 2),
+    calc(100% - var(--x2) * var(--px) * 2) calc(100% - var(--y2) * var(--px) * 2),
+    calc(100% - var(--x3) * var(--px) * 2) calc(100% - var(--y3) * var(--px) * 2) !important;
 }
+/* Large surfaces (panels, cards, header, damage panel, lists, dialog): three-step corners. */
+.glass { --x1: 1; --y1: 3; --x2: 2; --y2: 2; --x3: 3; --y3: 1; }
+
+/* Pressable buttons and chips: a one-pixel depth wall below the button, outside its outline.
+   The box reserves the wall's space (a taller transparent bottom border), the button itself is
+   drawn in the top part: outline (--bc) as its stepped outer shape, the face inset in it. The
+   background colour underneath is the wall (--wall-c), visible only in the band below the
+   outline, and the clip-path bottom (--press) decides how much of that band shows.
+   Pressing moves the button down into the wall's space while the wall shrinks by the same
+   amount, so the bottom edge stays put: hover = half a pixel, click = a full pixel.
+   Dropdown triggers look like fields and the header's text buttons are flat: no wall. */
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button), .mobs label {
+  --press: 0px;
+  --wall-c: color-mix(in srgb, var(--bc), #000 var(--wall-mix));
+  --o: linear-gradient(var(--bc), var(--bc));
+  border-bottom-width: calc(var(--px) * 2) !important;
+  background-color: var(--wall-c) !important;
+  /* face (1,2) (2,1), then the outline's outer shape (0,2) (1,1) (2,0), all one pixel short */
+  background-image: var(--f), var(--f), var(--o), var(--o), var(--o) !important;
+  background-position:
+    left var(--px) top calc(var(--px) * 2), left calc(var(--px) * 2) top var(--px),
+    left 0 top calc(var(--px) * 2), left var(--px) top var(--px), left calc(var(--px) * 2) top 0 !important;
+  background-size:
+    calc(100% - var(--px) * 2) calc(100% - var(--px) * 5), calc(100% - var(--px) * 4) calc(100% - var(--px) * 3),
+    100% calc(100% - var(--px) * 5), calc(100% - var(--px) * 2) calc(100% - var(--px) * 3),
+    calc(100% - var(--px) * 4) calc(100% - var(--px)) !important;
+  transform: translateY(var(--press));
+}
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):hover:not(:disabled), .mobs label:hover { --press: calc(var(--px) / 2); }
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):active:not(:disabled), .mobs label:active { --press: var(--px); }
 
 /* Options, highlights and selection rows: square. */
 .combo-opt, .combo-opt mark, .nav button, .chain-row.total, mark { border-radius: 0; }
@@ -562,7 +678,10 @@ input:not([type=checkbox]):not([type=radio]):not(.combo-input), button {
 
 /* Edge-to-edge header and damage strip on narrow screens: straight edges. */
 @media (max-width: 1000px) {
-  .topbar, .hero-panel { clip-path: none; background-image: none !important; }
+  .topbar, .hero-panel {
+    clip-path: none; background-image: none !important;
+    background-color: var(--face) !important; border-color: var(--bc) !important;
+  }
 }
 
 /* Backdrop behind the floating header, from the top of the window to the header's bottom edge,
