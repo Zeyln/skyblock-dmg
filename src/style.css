@@ -181,10 +181,55 @@ h3:first-child { margin-top: 0; }
   transform: rotate(180deg);
 }
 @media (prefers-reduced-motion: reduce) { .logo { transition: none; } }
-/* Theme change: the page cross-fades between the two palettes (view transition, main.js).
-   The logo is left out of the fade so its flip plays live instead of ghosting. */
+/* Theme change (view transition, main.js): the new page is wiped in over the old one, which
+   stays still underneath. Going dark it rises from the bottom edge, as if the view descends
+   underground; going light it comes down from the top, back up to the surface.
+   The new page is shown through a mask of:
+   - the rim: a dissolving, feathered edge ahead of it, like the spores below the sculk
+     (wipe-rim.js), travelling across the screen (--wipe-edge);
+   - everything behind the rim, fully;
+   - the whole page at a rising opacity (--wipe-fade), so the old page also shifts towards the
+     new theme's colours until the rim reaches it.
+   --wipe-edge and --wipe-fade are registered properties: those animate on the transition layer.
+   data-theme-wipe is set on <html> for the duration. The logo is left out of the transition so
+   its flip plays live instead of ghosting. */
 .logo { view-transition-name: theme-logo; }
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: .5s; animation-timing-function: ease; }
+@property --wipe-edge { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --wipe-fade { syntax: '<number>'; inherits: false; initial-value: 0; }
+:root { --wipe-ease: cubic-bezier(.6, 0, .3, 1); --wipe-rim-h: 80px; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+/* Going dark: feathered edge on top (solid below it), rising from below the screen to above it. */
+:root[data-theme-wipe="down"]::view-transition-new(root) {
+  -webkit-mask:
+    var(--wipe-rim-up) 0 var(--wipe-edge) / 512px var(--wipe-rim-h) repeat-x,
+    linear-gradient(#000 0 0) 0 calc(var(--wipe-edge) + var(--wipe-rim-h)) / 100% 100vh no-repeat,
+    linear-gradient(rgb(0 0 0 / var(--wipe-fade)) 0 0) 0 0 / 100% 100% no-repeat;
+  mask:
+    var(--wipe-rim-up) 0 var(--wipe-edge) / 512px var(--wipe-rim-h) repeat-x,
+    linear-gradient(#000 0 0) 0 calc(var(--wipe-edge) + var(--wipe-rim-h)) / 100% 100vh no-repeat,
+    linear-gradient(rgb(0 0 0 / var(--wipe-fade)) 0 0) 0 0 / 100% 100% no-repeat;
+  animation: theme-wipe-rise .7s var(--wipe-ease) both;
+}
+/* Going light: feathered edge at the bottom (solid above it), sinking from above the screen. */
+:root[data-theme-wipe="up"]::view-transition-new(root) {
+  -webkit-mask:
+    var(--wipe-rim-down) 0 calc(var(--wipe-edge) - var(--wipe-rim-h)) / 512px var(--wipe-rim-h) repeat-x,
+    linear-gradient(#000 0 0) 0 calc(var(--wipe-edge) - var(--wipe-rim-h) - 100vh) / 100% 100vh no-repeat,
+    linear-gradient(rgb(0 0 0 / var(--wipe-fade)) 0 0) 0 0 / 100% 100% no-repeat;
+  mask:
+    var(--wipe-rim-down) 0 calc(var(--wipe-edge) - var(--wipe-rim-h)) / 512px var(--wipe-rim-h) repeat-x,
+    linear-gradient(#000 0 0) 0 calc(var(--wipe-edge) - var(--wipe-rim-h) - 100vh) / 100% 100vh no-repeat,
+    linear-gradient(rgb(0 0 0 / var(--wipe-fade)) 0 0) 0 0 / 100% 100% no-repeat;
+  animation: theme-wipe-sink .7s var(--wipe-ease) both;
+}
+@keyframes theme-wipe-rise {
+  from { --wipe-edge: 100vh; --wipe-fade: 0; }
+  to { --wipe-edge: calc(var(--wipe-rim-h) * -1); --wipe-fade: 1; }
+}
+@keyframes theme-wipe-sink {
+  from { --wipe-edge: 0px; --wipe-fade: 0; }
+  to { --wipe-edge: calc(100vh + var(--wipe-rim-h)); --wipe-fade: 1; }
+}
 ::view-transition-old(theme-logo) { display: none; }
 ::view-transition-new(theme-logo), ::view-transition-group(theme-logo) { animation: none; }
 /* Expand / Collapse all — pushed to the right of the title. */

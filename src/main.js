@@ -2,6 +2,7 @@ import { loadItems, loadPets, loadPetLore, ARMOR_SLOTS } from './api.js';
 import { h } from './dom.js';
 import { combo } from './combo.js';
 import './sculk.js'; // dark-theme sculk strips (sets --sculk-* CSS variables)
+import './wipe-rim.js'; // feathered edge for the theme wipe (sets --wipe-rim-* CSS variables)
 import { parseFormatting } from './mctext.js';
 import { detectSets, evaluateSets } from './data/sets.js';
 import {
@@ -1268,8 +1269,8 @@ function trackResultsOverflow() {
 
 // ---------- theme ----------
 // The logo switches between the light and dark theme. index.html applies the saved (or system)
-// theme before the first paint; this wires up the button and saves the choice. The colour change
-// cross-fades through a view transition while the logo flips (CSS), where the browser supports it.
+// theme before the first paint; this wires up the button and saves the choice. The new theme
+// wipes in through a view transition while the logo flips (CSS), where the browser supports it.
 const THEME_KEY = 'dpscalc.theme';
 function initThemeToggle() {
   const btn = document.getElementById('theme-toggle');
@@ -1287,8 +1288,13 @@ function initThemeToggle() {
     const dark = !isDark();
     try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch { /* private mode */ }
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (document.startViewTransition && !reduced) document.startViewTransition(() => apply(dark));
-    else apply(dark);
+    if (!document.startViewTransition || reduced) return apply(dark);
+    // The wipe direction (style.css): down into the dark theme, back up to the light one.
+    const wipe = dark ? 'down' : 'up';
+    root.dataset.themeWipe = wipe;
+    document.startViewTransition(() => apply(dark)).finished.finally(() => {
+      if (root.dataset.themeWipe === wipe) delete root.dataset.themeWipe; // not if a newer one started
+    });
   });
   paint();
 }
