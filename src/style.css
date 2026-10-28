@@ -161,26 +161,26 @@ h3:first-child { margin-top: 0; }
 }
 .topbar-row { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 10px 16px; }
 .brand { display: flex; align-items: center; gap: 10px; }
-/* Theme switch: a flat grass block (green top, brown bottom). Clicking it flips the block 180°
-   and toggles the dark theme; while flipping, green turns to deepslate grey and brown to sculk
-   teal, so the dark theme shows an upright sculk block. --logo-a is the half that starts on top,
-   --logo-b the half that starts at the bottom. */
+/* Theme switch: a flat grass block (green top, brown bottom). Clicking it turns the block half a
+   revolution and toggles the dark theme; while turning, green fades to deepslate grey and brown
+   to sculk teal, so the dark theme shows an upright sculk block. The turn is pixel art frames
+   (logo.js), not a rotated element, so its pixels stay square. --logo-a is the half that starts
+   on top, --logo-b the half that starts at the bottom. */
 .logo {
   --logo-a: #0ca528;   /* grass */
   --logo-b: #6b3d14;   /* dirt */
-  flex: none; width: 22px; height: 22px; padding: 0; border: 0; cursor: pointer;
-  background: var(--logo-a);
-  box-shadow: inset 0 -12px 0 var(--logo-b) !important;
-  transition: transform .5s cubic-bezier(.5, 0, .2, 1), background-color .5s ease, box-shadow .5s ease;
+  flex: none; width: 22px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer;
 }
-/* Focus ring drawn inside: the pixel-corner clip-path would cut off an outline. */
-.logo:focus-visible { outline: none; box-shadow: inset 0 -12px 0 var(--logo-b), inset 0 0 0 var(--px) var(--accent-ink) !important; }
+/* The frames are 15 x 15 pixels around the 11 x 11 block, so the corners have room to turn. */
+.logo svg { display: block; width: 30px; height: 30px; margin: -4px; overflow: visible; }
+.logo-a { fill: var(--logo-a); transition: fill .5s ease; }
+.logo-b { fill: var(--logo-b); transition: fill .5s ease; }
+.logo:focus-visible { outline: var(--px) solid var(--accent-ink); outline-offset: 6px; }
 :root[data-theme="dark"] .logo {
   --logo-a: #3e4049;   /* deepslate */
   --logo-b: #0f6e78;   /* sculk */
-  transform: rotate(180deg);
 }
-@media (prefers-reduced-motion: reduce) { .logo { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .logo-a, .logo-b { transition: none; } }
 /* Theme change (view transition, main.js): the new page is wiped in over the old one, which
    stays still underneath. Going dark it rises from the bottom edge, as if the view descends
    underground; going light it comes down from the top, back up to the surface.
@@ -436,7 +436,41 @@ input, select, button {
 }
 input:focus, select:focus { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); --face: var(--field-focus); background: var(--field-focus); }
 input[type=number] { width: 100%; }
-input[type=checkbox], input[type=radio] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+input[type=radio] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+/* Pixel tick (5 x 4 pixels): white for ticked checkboxes, black as a mask for coloured ticks. */
+:root {
+  --tick-white: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23fff' d='M4 0h1v1H4zM3 1h1v1H3zM0 2h1v1H0zM2 2h1v1H2zM1 3h1v1H1z'/%3E%3C/svg%3E");
+  --tick-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 4' shape-rendering='crispEdges'%3E%3Cpath d='M4 0h1v1H4zM3 1h1v1H3zM0 2h1v1H0zM2 2h1v1H2zM1 3h1v1H1z'/%3E%3C/svg%3E");
+}
+/* Checkboxes: drawn like the other framed elements (outline as the background colour, the face
+   inset a pixel, stepped clip-path corners), in the theme's colours.
+   Ticked: accent face with a white pixel tick. Keyboard focus outlines it in the accent. */
+input[type=checkbox] {
+  -webkit-appearance: none; appearance: none; flex: none; margin: 0; padding: 0;
+  width: 18px; height: 18px; cursor: pointer;
+  --c3: var(--px);  /* one-pixel corners: two steps would make such a small box look round */
+  --bc: var(--line-strong); --face: var(--field);
+  --f: linear-gradient(var(--face), var(--face));
+  border: var(--px) solid transparent;
+  background-color: var(--bc);
+  background-image: var(--f);
+  background-repeat: no-repeat;
+  background-origin: border-box;
+  background-position: var(--px) var(--px);
+  background-size: calc(100% - var(--px) * 2) calc(100% - var(--px) * 2);
+  box-shadow: none;
+}
+input[type=checkbox]:checked {
+  --bc: var(--accent); --face: var(--accent);
+  background-image: var(--tick-white), var(--f);
+  background-position: center, var(--px) var(--px);
+  background-size: 10px 8px, calc(100% - var(--px) * 2) calc(100% - var(--px) * 2);
+}
+input[type=checkbox]:focus { --face: var(--field); }
+input[type=checkbox]:checked:focus { --face: var(--accent); }
+input[type=checkbox]:focus:not(:focus-visible):not(:checked) { --bc: var(--line-strong); }
+input[type=checkbox]:focus-visible { --bc: var(--accent-ink); }
+input[type=checkbox]:disabled { cursor: not-allowed; }
 select:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 button { cursor: pointer; font-weight: 500; --face: var(--button-face); }
 button:focus-visible { outline: none; --bc: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -602,7 +636,11 @@ table.rows input { width: 100%; }
 }
 .combo-opt.is-active { background: var(--accent-soft); }
 .combo-opt.is-selected { font-weight: 600; }
-.combo-opt.is-selected::after { content: '✓'; margin-left: 4px; color: var(--accent); font-weight: 700; order: 9; }
+/* Selected option: the pixel tick, in the accent colour. */
+.combo-opt.is-selected::after {
+  content: ''; flex: none; order: 9; margin-left: 6px; width: 10px; height: 8px; background: var(--accent);
+  -webkit-mask: var(--tick-mask) center / 100% 100% no-repeat; mask: var(--tick-mask) center / 100% 100% no-repeat;
+}
 .combo-opt.is-disabled { opacity: .45; cursor: default; }
 /* The name has priority: the note (stats, HP…) gives up its room first, and a name that still
    doesn't fit wraps onto a second line instead of being cut off. */
@@ -691,7 +729,7 @@ h1, .panel-title, .card h2, .modal h2,
    large surfaces 3. The bottom edge sits --press above the box bottom (pressable buttons). */
 .notch, .panel, .card, .combo-pop, .modal, .sub, .set-row, .location, .presets, .chain-row, .stat-tiles div,
 input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context span, .badge, .segmented, .segmented label,
-.nav button, .formula, .logo, .topbar, .hero-panel {
+.nav button, .formula, .topbar, .hero-panel {
   --c1: var(--px);
   --c2: var(--px);
   --c3: calc(var(--px) * 2);
@@ -715,8 +753,8 @@ input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context spa
 .panel, .card, .combo-pop, .modal, .topbar, .hero-panel { --c2: calc(var(--px) * 2); --c3: calc(var(--px) * 3); }
 /* The inner text box sits inside a notched field; it must not be clipped itself. */
 .combo-input { clip-path: none; }
-/* Checkboxes and radio buttons keep their native shape. */
-input[type=checkbox], input[type=radio] { clip-path: none; }
+/* Radio buttons (hidden inside the segmented switches) keep their native shape. */
+input[type=radio] { clip-path: none; }
 
 /* Section headers and nested surfaces: square, no shadows. */
 .panel[open] > summary { border-bottom-width: var(--px); border-radius: 0; }

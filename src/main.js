@@ -3,6 +3,7 @@ import { h } from './dom.js';
 import { combo } from './combo.js';
 import './sculk.js'; // dark-theme sculk strips (sets --sculk-* CSS variables)
 import './wipe-rim.js'; // feathered edge for the theme wipe (sets --wipe-rim-* CSS variables)
+import { initLogo } from './logo.js';
 import { parseFormatting } from './mctext.js';
 import { detectSets, evaluateSets } from './data/sets.js';
 import {
@@ -1270,12 +1271,13 @@ function trackResultsOverflow() {
 // ---------- theme ----------
 // The logo switches between the light and dark theme. index.html applies the saved (or system)
 // theme before the first paint; this wires up the button and saves the choice. The new theme
-// wipes in through a view transition while the logo flips (CSS), where the browser supports it.
+// wipes in through a view transition while the logo turns (logo.js), where the browser supports it.
 const THEME_KEY = 'dpscalc.theme';
 function initThemeToggle() {
   const btn = document.getElementById('theme-toggle');
   const root = document.documentElement;
   const isDark = () => root.dataset.theme === 'dark';
+  const turnLogo = initLogo(btn, isDark());
   const paint = () => {
     btn.setAttribute('aria-pressed', String(isDark()));
     btn.title = isDark() ? 'Switch to light theme' : 'Switch to dark theme';
@@ -1288,11 +1290,17 @@ function initThemeToggle() {
     const dark = !isDark();
     try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch { /* private mode */ }
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!document.startViewTransition || reduced) return apply(dark);
+    if (!document.startViewTransition || reduced) {
+      turnLogo(dark, reduced ? 0 : 500);
+      return apply(dark);
+    }
     // The wipe direction (style.css): down into the dark theme, back up to the light one.
     const wipe = dark ? 'down' : 'up';
     root.dataset.themeWipe = wipe;
-    document.startViewTransition(() => apply(dark)).finished.finally(() => {
+    const transition = document.startViewTransition(() => apply(dark));
+    // Start the logo turn when the wipe starts (after the old page has been captured).
+    transition.ready.then(() => turnLogo(dark, 500), () => turnLogo(dark, 500));
+    transition.finished.finally(() => {
       if (root.dataset.themeWipe === wipe) delete root.dataset.themeWipe; // not if a newer one started
     });
   });
