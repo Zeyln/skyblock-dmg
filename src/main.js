@@ -208,8 +208,42 @@ function collapsible(cls, key, title, summary, body, defaultOpen) {
       summaryEl,
       h('span', { class: 'chev' })),
     h('div', { class: cls.includes('sub') ? 'sub-body' : 'panel-body' }, body));
-  d.addEventListener('toggle', () => rememberOpen(key, d.open));
+  // Opened or closed by the user (click, or Enter/Space on the header) rather than Expand all:
+  // bring the panel fully into view once it has changed size.
+  let byUser = false;
+  d.querySelector('summary').addEventListener('click', () => { byUser = true; });
+  d.addEventListener('toggle', () => {
+    rememberOpen(key, d.open);
+    if (byUser) revealPanel(d);
+    byUser = false;
+  });
   return d;
+}
+
+// Scroll so the whole panel is on screen below the fixed header (or, if it is taller than the
+// space, so its top is). Panels in the summary column scroll that column instead of the page.
+function revealPanel(el) {
+  const GAP = 16;
+  const results = el.closest('.results');
+  const scroller = results && getComputedStyle(results).overflowY === 'auto' ? results : null;
+  const r = el.getBoundingClientRect();
+  let top = GAP;
+  let bottom = window.innerHeight - GAP;
+  if (scroller) {
+    const s = scroller.getBoundingClientRect();
+    top = s.top + GAP;
+    bottom = s.bottom - GAP;
+  } else {
+    // Fixed bars above the panel: the header, and on narrow screens the damage strip.
+    for (const bar of document.querySelectorAll('.topbar, .hero-panel')) {
+      const b = bar.getBoundingClientRect();
+      if (b.height && b.left < r.right && b.right > r.left && b.top < window.innerHeight / 2) top = Math.max(top, b.bottom + GAP);
+    }
+  }
+  const delta = r.top < top || r.height > bottom - top ? r.top - top : r.bottom > bottom ? r.bottom - bottom : 0;
+  if (!delta) return;
+  const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  (scroller || window).scrollBy({ top: delta, behavior });
 }
 // Top-level section card.
 const panel = (key, title, summary, body, defaultOpen = false) =>
