@@ -712,7 +712,9 @@ button.primary:hover { color: var(--on-accent); }
 .modal.sim-screen[open] { display: flex; }
 .sim-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sim-head h2 { margin: 0; }
-.sim-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+/* Never scrolls: the middle row takes what the settings and readouts leave, and the indicator spacing
+   shrinks with the window height. */
+.sim-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: clamp(8px, 1.8vh, 14px); }
 .sim-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
 .sim-settings .field input { width: 92px; }
 .sim-settings .segmented label { white-space: nowrap; }
@@ -720,10 +722,10 @@ button.primary:hover { color: var(--on-accent); }
 .sim-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .sim-controls button { padding: 8px 14px; min-width: 76px; }
 /* Action indicator on the left, an empty stage in the middle (kept free for a graphic). */
-.sim-main { flex: 1 0 auto; min-height: 160px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
-.sim-indicators { display: flex; flex-direction: column; gap: 22px; align-self: start; min-width: 0; }
-.sim-procs { list-style: none; margin: 0; padding: 4px 0 0; display: flex; flex-direction: column; gap: 12px; align-self: start; }
-.sim-procs li { display: flex; align-items: center; gap: 10px; font-size: 13px; color: color-mix(in srgb, var(--faint) 55%, transparent); }
+.sim-main { flex: 1 1 0; min-height: 0; overflow: hidden; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+.sim-indicators { display: flex; flex-direction: column; gap: clamp(8px, 2.4vh, 22px); align-self: start; min-width: 0; }
+.sim-procs { list-style: none; margin: 0; padding: 4px 0 0; display: flex; flex-direction: column; gap: clamp(3px, 1.3vh, 12px); align-self: start; }
+.sim-procs li { display: flex; align-items: center; gap: 10px; font-size: clamp(11px, 1.7vh, 13px); color: color-mix(in srgb, var(--faint) 55%, transparent); }
 /* Pixel LED: faint when idle; LED and label light up red for 100 ms (main.js). No transition, so it blinks. */
 .sim-procs .led { flex: none; width: 8px; height: 8px; background: currentColor; }
 .sim-procs li.on { color: var(--crit); }

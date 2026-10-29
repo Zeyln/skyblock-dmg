@@ -385,7 +385,7 @@ export function simulate(input, opts = {}) {
       attuneHits = 0;
       attune = (attune + 1) % HELLION_ORDER.length;
     }
-    events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp });
+    events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp, ...(broodOn ? { target: 'Conjoined Brood' } : {}) });
     if (maxHp && hp <= 0 && boss?.brood && !broodOn) {
       // Till Death Do Us Part: the Conjoined Brood takes over with more health and only its passives.
       broodOn = true;

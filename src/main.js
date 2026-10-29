@@ -1498,11 +1498,17 @@ function renderSim(body) {
       return { k, detail, row: h('li', {}, h('i', { class: 'led', 'aria-hidden': 'true' }), h('span', {}, label, detail)) };
     });
 
-  const readout = (k) => { const v = h('b', {}, '—'); return { v, el: h('div', {}, v, h('span', {}, k)) }; };
+  const readout = (k) => {
+    const v = h('b', {}, '—');
+    const label = h('span', {}, k);
+    return { v, label, el: h('div', {}, v, label) };
+  };
   const time = readout(s.mode === 'kill' ? 'Time' : `Time (of ${fmt(s.seconds)} s)`);
   const dmg = readout('Damage');
   const dps = readout('Damage / s');
-  const hpRead = readout('Enemy HP');
+  // The chosen enemy's name (the health bar says the rest), or whatever is being hit instead (a demon, a pup, the Brood).
+  const enemyName = state.target.enemy || 'Enemy';
+  const hpRead = readout(enemyName);
   const hpBar = h('i', { style: 'width:100%' });
   if (s.maxHp) hpRead.el.append(h('span', { class: 'sim-hpbar' }, hpBar)); // a span: tile divs get tile styling
 
@@ -1534,6 +1540,8 @@ function renderSim(body) {
       const e = i ? events[i - 1] : null;
       const hp = e ? e.hp : s.startHp;
       hpRead.v.textContent = fmt(hp);
+      const label = e?.target || enemyName;
+      if (hpRead.label.textContent !== label) hpRead.label.textContent = label;
       hpBar.style.width = `${hp / (e?.maxHp || s.maxHp) * 100}%`;
     } else hpRead.v.textContent = '—';
   };
