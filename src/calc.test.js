@@ -35,6 +35,16 @@ describe('core formula', () => {
     expect(r.nonCrit).toBe(660);
   });
 
+  it('target defense reduces the hit after all bonuses, then rounds', () => {
+    const weapon = { item: sword({ DAMAGE: 95 }), enchants: { sharpness: 5 } };
+    const r = calculate({ weapon, combatLevel: 50, bonuses: [{ label: 'x', multiplier: 2 }], target: { defense: 1000 } });
+    // 660 × 100 / 1100 = 60; crit 990 × 100 / 1100 = 90
+    expect(r.defenseMult).toBeCloseTo(1 / 11);
+    expect(r.nonCrit).toBe(60);
+    expect(r.crit).toBe(90);
+    expect(calculate({ weapon }).defenseMult).toBe(1);
+  });
+
   it('mixed-case and tiered API stats', () => {
     expect(itemStats({ stats: { damage: 10, DAMAGE: 5 }, tiered_stats: { STRENGTH: [1, 4] } }))
       .toEqual({ DAMAGE: 15, STRENGTH: 4 });
@@ -197,6 +207,12 @@ describe('enchants per weapon type', () => {
     expect(s.additiveMult).toBeCloseTo(1.5); // Sharpness VII only
   });
 
+  it('a leftover Critical enchant adds no crit damage on a bow or rod', () => {
+    expect(calculate({ weapon: { item: rod({ DAMAGE: 95 }), enchants: { critical: 7 } } }).critDamage).toBe(50);
+    expect(calculate({ weapon: { item: bow({ DAMAGE: 95 }), enchants: { critical: 7 } } }).critDamage).toBe(50);
+    expect(calculate({ weapon: { item: sword({ DAMAGE: 95 }), enchants: { critical: 7 } } }).critDamage).toBe(150);
+  });
+
   it('offers only the ultimates a weapon type can take', () => {
     const names = (item) => ultimatesFor(item).map((u) => u.id);
     expect(names(rod({}))).toEqual(expect.arrayContaining(['soul_eater', 'fatal_tempo', 'inferno', 'ultimate_wise', 'flash']));
@@ -294,9 +310,16 @@ describe('stars and item tiers', () => {
   it('dungeon stars: +2%/star outside, +10%/star inside, master stars only in Master Mode', () => {
     const w = { item: dungeonSword, stars: 10 };
     expect(calculate({ weapon: w }).damage).toBeCloseTo(110);
-    // In dungeons the Catacombs boost applies too (+10% at Catacombs 0).
-    expect(calculate({ weapon: w, dungeonMode: 'catacombs' }).damage).toBeCloseTo(150 * 1.1);
-    expect(calculate({ weapon: w, dungeonMode: 'master' }).damage).toBeCloseTo(175 * 1.1);
+    // In dungeons the Catacombs boost (+10% at Catacombs 0) adds to the star bonus.
+    expect(calculate({ weapon: w, dungeonMode: 'catacombs' }).damage).toBeCloseTo(100 * (1 + 0.5 + 0.1));
+    expect(calculate({ weapon: w, dungeonMode: 'master' }).damage).toBeCloseTo(100 * (1 + 0.75 + 0.1));
+  });
+
+  it('crit chance gets stars but not the Catacombs boost', () => {
+    const w = { item: sword({ DAMAGE: 100, CRITICAL_CHANCE: 10 }, { dungeon_item: true }), stars: 5 };
+    const r = calculate({ weapon: w, dungeonMode: 'catacombs', catacombsLevel: 50 });
+    expect(r.critChance).toBeCloseTo(30 + 10 * 1.5); // 30 base player crit chance
+    expect(r.damage).toBeCloseTo(100 * (1 + 0.5 + 4.85));
   });
 
   it('catacombs level boosts dungeon items only in dungeons', () => {
@@ -311,7 +334,7 @@ describe('stars and item tiers', () => {
     expect(r.catacombsLevel).toBe(50);
     const w = { item: dungeonSword, stars: 5 };
     expect(calculate({ weapon: w, catacombsLevel: 50 }).damage).toBeCloseTo(110); // outside: stars only
-    expect(calculate({ weapon: w, catacombsLevel: 50, dungeonMode: 'catacombs' }).damage).toBeCloseTo(100 * 1.5 * 5.85);
+    expect(calculate({ weapon: w, catacombsLevel: 50, dungeonMode: 'catacombs' }).damage).toBeCloseTo(100 * (1 + 0.5 + 4.85));
     const normal = { item: sword({ DAMAGE: 100 }) };
     expect(calculate({ weapon: normal, catacombsLevel: 50, dungeonMode: 'catacombs' }).damage).toBe(100);
   });
@@ -321,7 +344,7 @@ describe('stars and item tiers', () => {
       max_stars: 5, stats: { DAMAGE: 100 } };
     const inMaster = (x) => calculate({ weapon: { item: term, stars: 10, ...x }, dungeonMode: 'master', catacombsLevel: 50 }).damage;
     expect(inMaster({})).toBeCloseTo(110); // normal item: +2%/star, max 5 stars, no Catacombs boost
-    expect(inMaster({ dungeonized: true })).toBeCloseTo(100 * 1.75 * 5.85);
+    expect(inMaster({ dungeonized: true })).toBeCloseTo(100 * (1 + 0.75 + 4.85));
     // Outside dungeons dungeonizing changes nothing beyond the normal +2%/star.
     expect(calculate({ weapon: { item: term, stars: 5, dungeonized: true }, catacombsLevel: 50 }).damage).toBeCloseTo(110);
     // Items that can't be dungeonized ignore the flag.

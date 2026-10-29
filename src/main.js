@@ -1284,6 +1284,7 @@ function renderResults(r) {
     step('Base damage', `(5 + ${fmt(r.damage, 1)} Damage) × (1 + ${fmt(r.strength, 1)}% Strength)`, fmt(r.initial, 1)),
     step('Additive bonuses', `${r.additive.length} source${r.additive.length === 1 ? '' : 's'}`, `×${fmt(r.additiveMult, 3)}`),
     step('Multiplicative bonuses', `${r.multiplicative.length} source${r.multiplicative.length === 1 ? '' : 's'}`, `×${fmt(r.multMult, 3)}`),
+    r.defense ? step('Target defense', `100 / (100 + ${fmt(r.defense)})`, `×${fmt(r.defenseMult, 3)}`) : '',
     step('Non-crit hit', '', fmt(r.nonCrit), 'total'),
     step('Crit multiplier', `1 + ${fmt(r.critDamage, 1)}% Crit Damage${r.soulEaterStr ? ' (+ Soul Eater Strength)' : ''}`, `×${fmt(r.critMult, 3)}`),
   );
@@ -1305,7 +1306,8 @@ function renderResults(r) {
       detail('formula', 'Full formula', '', h('div', { class: 'formula' },
         `(5 + ${fmt(r.damage, 1)}) × (1 + ${fmt(r.strength, 1)}/100)`, h('br'),
         `= ${fmt(r.baseDamage, 1)} × ${fmt(r.strengthMult, 4)} = ${fmt(r.initial, 1)}`, h('br'),
-        `× additive ${fmt(r.additiveMult, 4)} × mult ${fmt(r.multMult, 4)}`, h('br'),
+        `× additive ${fmt(r.additiveMult, 4)} × mult ${fmt(r.multMult, 4)}`,
+        r.defense ? ` × defense 100/(100 + ${fmt(r.defense)})` : '', h('br'),
         `= ${fmt(r.nonCrit)} non-crit`, h('br'),
         `× crit (1 + ${fmt(r.critDamage, 1)}/100) = ${fmt(r.crit)}`))),
     r.notes.length ? card('Notes', h('ul', { class: 'notes' }, r.notes.map((n) => h('li', {}, n)))) : '',

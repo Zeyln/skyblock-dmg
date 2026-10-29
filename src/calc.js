@@ -91,14 +91,20 @@ function pieceSources(piece, kind, input, statPct) {
   const quality = drop ? Math.max(0, Math.min(QUALITY_MAX, piece.quality || 0)) : 0;
   const inDungeon = input.dungeonMode === 'catacombs' || input.dungeonMode === 'master';
   const dungeonItem = asDungeonItem(item, piece.dungeonized);
-  const cataMult = inDungeon && dungeonItem.dungeon_item ? 1 + catacombsBoost(input.catacombsLevel) / 100 : 1;
-  const scale = starMultiplier(dungeonItem, piece.stars, input.dungeonMode) * (1 + quality / 100) * cataMult;
+  const cataBonus = inDungeon && dungeonItem.dungeon_item ? catacombsBoost(input.catacombsLevel) / 100 : 0;
+  const starBonus = starMultiplier(dungeonItem, piece.stars, input.dungeonMode) - 1;
+  // Quality rolls the base stats; stars and the Catacombs boost then add together (wiki: Catacombs ›
+  // Stat Bonuses). Crit Chance gets the stars but not the Catacombs boost.
+  const qualityMult = 1 + quality / 100;
+  const scale = qualityMult * (1 + starBonus + cataBonus);
   const unstarred = itemStats(item, { tier: piece.statTier, level: piece.level });
   // Price-paid bonus (Midas' Sword) is part of the item's stats, so stars scale it too.
   const greed = PRICE_ITEMS[item.id] ? greedBonus(item.id, piece.price) : 0;
   if (greed) addStats(unstarred, { DAMAGE: greed, STRENGTH: greed });
   const base = {};
-  addStats(base, unstarred, scale);
+  for (const [k, v] of Object.entries(unstarred)) {
+    base[k] = v * (k === 'CRITICAL_CHANCE' ? qualityMult * (1 + starBonus) : scale);
+  }
   const prog = PROGRESSION_ITEMS[item.id];
   const tags = [
     dungeonItem !== item ? 'dungeonized' : '',
@@ -107,7 +113,7 @@ function pieceSources(piece, kind, input, statPct) {
     piece.statTier ? (drop ? floorLabel(piece.statTier) : `tier ${piece.statTier}`) : '',
     quality ? `${quality}% quality` : '',
     piece.stars ? `${piece.stars}✪` : '',
-    cataMult !== 1 ? `Cata +${catacombsBoost(input.catacombsLevel)}%` : '',
+    cataBonus ? `Cata +${catacombsBoost(input.catacombsLevel)}%` : '',
     scale !== 1 ? `×${+scale.toFixed(3)}` : '',
   ].filter(Boolean);
   out.push({ label: `${kind === 'weapon' ? 'Weapon: ' : ''}${item.name}${tags.length ? ` (${tags.join(', ')})` : ''}`, stats: base });
@@ -149,7 +155,8 @@ function pieceSources(piece, kind, input, statPct) {
 
 /**
  * Compute single-hit damage.
- * Final = floor((5 + Damage) * (1 + Strength/100) * Additive * Multiplicative [* (1 + CritDamage/100)])
+ * Final = floor((5 + Damage) * (1 + Strength/100) * Additive * Multiplicative [* (1 + CritDamage/100)]
+ *               * 100 / (100 + Target defense))
  * where Additive = 1 + sum(additive %)/100 and Multiplicative = product of multipliers.
  */
 export function calculate(input) {
@@ -229,6 +236,9 @@ export function calculate(input) {
   for (const ench of ENCHANTS) {
     const lvl = weapon.enchants?.[ench.id] || 0;
     if (!lvl || oneForAll) continue;
+    // Checked first so a leftover enchant (e.g. Sharpness or Critical from a sword on a fishing rod)
+    // neither counts nor blocks a conflicting one that fits.
+    if (!enchantFits(ench, weapon.item)) continue;
     const clash = enchantConflict(ench.id, applied);
     if (clash) {
       notes.push(`${ench.name} conflicts with ${ENCHANTS.find((e) => e.id === clash).name}; only the first is counted.`);
@@ -238,7 +248,6 @@ export function calculate(input) {
     const v = ench.values[Math.min(lvl, ench.values.length) - 1];
     const label = `${ench.name} ${roman(lvl)}`;
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
-    if (!enchantFits(ench, weapon.item)) continue; // e.g. Sharpness left over from a sword on a fishing rod
     if (!hitsMob(ench.mobs, target)) continue;
     if (ench.firstHit && !player.firstHit) continue;
     if (ench.firstThree && !player.firstHit) continue;
@@ -385,11 +394,15 @@ export function calculate(input) {
   const multMult = multiplicative.reduce((a, b) => a * b.value, 1);
   const critMult = 1 + critDamage / 100;
 
+  // Target defense reduces the hit after all bonuses: × 100 / (100 + Defense); rounding comes last.
+  const defense = Math.max(0, target.defense || 0);
+  const defenseMult = 100 / (100 + defense);
+
   const preCrit = initial * additiveMult * multMult;
-  const nonCrit = Math.floor(preCrit);
+  const nonCrit = Math.floor(preCrit * defenseMult);
   // Soul Eater's Strength only applies to the next crit.
   const critInitial = baseDamage * (1 + (strength + soulEaterStr) / 100);
-  const crit = Math.floor(critInitial * additiveMult * multMult * critMult);
+  const crit = Math.floor(critInitial * additiveMult * multMult * critMult * defenseMult);
   const expected = nonCrit + (crit - nonCrit) * critChance / 100;
   if (soulEaterStr) notes.push(`Soul Eater adds +${Math.round(soulEaterStr)} Strength to the crit hit only.`);
 
@@ -400,7 +413,7 @@ export function calculate(input) {
     masterMode: input.dungeonMode === 'master',
     catacombsLevel: clampCatacombs(input.catacombsLevel),
     cataBoost: catacombsBoost(input.catacombsLevel),
-    baseDamage, strengthMult, initial, additiveMult, multMult, critMult,
+    baseDamage, strengthMult, initial, additiveMult, multMult, critMult, defense, defenseMult,
     nonCrit, crit, expected,
   };
 }

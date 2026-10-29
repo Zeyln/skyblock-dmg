@@ -19,8 +19,9 @@ Game values follow the Hypixel SkyBlock wiki and are kept in `src/data/`.
 Initial      = (5 + Damage) × (1 + Strength / 100)
 Additive     = 1 + Σ additive % / 100        enchants, combat level, shards, set bonuses, pets
 Multiplier   = Π multiplicative bonuses      weapon bonuses vs mob types, dungeon class, Hedgehog
-Non-crit     = floor(Initial × Additive × Multiplier)
-Crit         = floor(Initial × Additive × Multiplier × (1 + Crit Damage / 100))
+Defense      = 100 / (100 + Target defense)
+Non-crit     = floor(Initial × Additive × Multiplier × Defense)
+Crit         = floor(Initial × Additive × Multiplier × (1 + Crit Damage / 100) × Defense)
 ```
 
 Every stat source is summed into Damage, Strength and Crit Damage first; each bonus then goes into the Additive or Multiplier term depending on how the game stacks it.
