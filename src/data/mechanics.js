@@ -28,7 +28,7 @@ export const MOB_TYPES = [
 // (confirmed on Bonzo, Scarf and The Professor; assumed for the F7 bosses).
 // dungeon: where the enemy is fought, which drives the In dungeon setting:
 //   undefined = outside dungeons, 'floor' = normal Catacombs only, 'master' = Master Mode only,
-//   'either' = both (regular dungeon mobs/minibosses; HP depends on floor, hpRange shown instead).
+//   'either' = both (regular dungeon mobs/minibosses; HP per floor in DUNGEON_FLOORS).
 const enemy = (group, name, mobs, maxHp, opts = {}) => ({ group, name, mobs, maxHp, defense: 0, boss: false, families: [], ...opts });
 
 // Dungeon mode an enemy forces ('none' | 'catacombs' | 'master'). 'either' enemies keep the
@@ -42,7 +42,50 @@ export function enemyDungeonMode(enemy, current) {
 }
 const floorBoss = (name, mobs, hp, opts = {}) => enemy('Dungeon bosses (Catacombs)', name, mobs, hp, { boss: true, dungeon: 'floor', ...opts });
 const masterBoss = (name, mobs, hp, opts = {}) => enemy('Dungeon bosses (Master Mode)', name, mobs, hp, { boss: true, dungeon: 'master', ...opts });
-const dungeonMob = (group, name, mobs, hpRange, opts = {}) => enemy(group, name, mobs, 0, { dungeon: 'either', hpRange, ...opts });
+// Health per floor of the regular dungeon mobs and minibosses, from each mob's wiki page (checked
+// Oct 2026). E = Entrance, F1-F7 = Catacombs, M1-M7 = Master Mode; a floor that's missing is one
+// the mob doesn't spawn on. A number is the health; [health, defense] where the wiki lists a
+// defense that changes per floor. Where the wiki gives two entries for a floor (the minibosses'
+// two variants; Crypt Dreadlord/Souleater on F5 and M5), the first (lower-level) one is used.
+const DUNGEON_FLOORS = {
+  'Crypt Lurker': { E: 9000, F1: 12800, F2: 13800, F3: 22000, F4: 49200, F5: 92250, F6: 200000, F7: 420000,
+    M1: 805000, M2: 1500000, M3: 2300000, M4: 3250000, M5: 4350000, M6: 6400000, M7: 13000000 },
+  'Crypt Dreadlord': { E: 14000, F1: 25600, F2: 39000, F3: 64900, F5: 126000, F6: 390000, F7: 840000,
+    M1: 1050000, M2: 2025000, M3: 3300000, M5: 4875000, M6: 10200000, M7: 20000000 },
+  'Crypt Souleater': { E: 13000, F1: 20000, F2: 26400, F3: 46750, F5: 90000, F6: 375000, F7: 800000,
+    M1: 1100000, M2: 2100000, M3: 5100000, M5: 6000000, M6: 10400000, M7: 20000000 },
+  'Zombie Soldier': { F3: 77000, F4: 156000, F5: 240000, F6: 500000, F7: 1200000,
+    M3: 6000000, M4: 8750000, M5: 12000000, M6: 18000000, M7: 36000000 },
+  'Zombie Knight': { F3: 93500, F4: 198000, F5: 322500, F6: 580000, F7: 1280000,
+    M3: 7000000, M4: 10000000, M5: 13500000, M6: 20000000, M7: 40000000 },
+  'Zombie Commander': { F6: 1700000, F7: 3500000, M6: 160000000, M7: 250000000 },
+  'Zombie Lord': { F7: 5000000, M7: 300000000 },
+  'Skeleton Master': { F2: 31200, F3: 54450, F4: 108000, F5: 210000, F6: 400000, F7: 900000,
+    M2: 3450000, M3: 5400000, M4: 8000000, M5: 11100000, M6: 21000000, M7: 42000000 },
+  'Skeleton Lord': { F7: 2000000, M7: 120000000 },
+  'Super Archer': { F4: 240000, F5: 412500, F6: 750000, F7: 1600000, M4: 48000000, M5: 60000000, M6: 100000000, M7: 200000000 },
+  'Skeletor': { F3: 250000, F4: 500000, F5: 700000, F6: 1000000, M3: 6900000, M4: 7800000, M5: 9000000, M6: 10200000 },
+  'Withermancer': { F4: 180000, F5: 352500, F6: 600000, F7: 1250000, M4: 31250000, M5: 48000000, M6: 88000000, M7: 150000000 },
+  'Cellar Spider': { E: 17000, F1: 20800, F2: 25200, F3: 35750, F4: 57000, F5: 93750, F6: 200000, F7: 420000,
+    M1: 500000, M2: 900000, M3: 1500000, M4: 2250000, M5: 3150000, M6: 4800000, M7: 9500000 },
+  'Fel': { F5: 450000, F6: 700000, F7: 1500000, M5: 45000000, M6: 80000000, M7: 160000000 },
+  'Mimic': { F6: 1500000, F7: 3000000, M6: 150000000, M7: 180000000 },
+  // Young/Unstable/Holy variant (Superior is a little higher); defense 100 on every floor.
+  'Lost Adventurer': { E: 40000, F1: 52000, F2: 130000, F3: 150000, F4: 270000, F5: 302500, F6: 660000, F7: 2600000,
+    M1: 8000000, M2: 14250000, M3: 24000000, M4: 35000000, M5: 48000000, M6: 54000000, M7: 92000000 },
+  'Angry Archaeologist': { E: [8500, 900], F1: [12000, 900], F2: [21000, 1000], F3: [33000, 1050], F4: [69000, 1100],
+    F5: [135000, 1150], F6: [240000, 1200], F7: [420000, 1200], M1: [1000000, 900], M2: [1875000, 1000],
+    M3: [3000000, 1050], M4: [4375000, 1100], M5: [6000000, 1150], M6: [6900000, 1200], M7: [12000000, 1200] },
+};
+const dungeonMob = (group, name, mobs, hpRange, opts = {}) =>
+  enemy(group, name, mobs, 0, { dungeon: 'either', hpRange, floors: DUNGEON_FLOORS[name], ...opts });
+
+// A dungeon mob's health and defense on a floor ('E', 'F1'…'M7'), or null if it doesn't spawn there.
+export function floorStats(enemy, floor) {
+  const v = enemy?.floors?.[floor];
+  if (v == null) return null;
+  return Array.isArray(v) ? { hp: v[0], defense: v[1] } : { hp: v, defense: enemy.defense || 0 };
+}
 export const ENEMIES = [
   ...[['I', 500], ['II', 20000], ['III', 400000], ['IV', 1500000], ['V', 10000000]].map(([t, hp]) =>
     enemy('Slayer bosses', `Revenant Horror ${t}`, ['Undead'], hp, { boss: true })),
@@ -103,27 +146,208 @@ export const ENEMIES = [
   dungeonMob('Dungeon mobs', 'Cellar Spider', ['Arthropod', 'Subterranean'], '17,000 – 9,500,000'),
   dungeonMob('Dungeon mobs', 'Fel', ['Arcane'], '450,000 – 160,000,000'),
   dungeonMob('Dungeon mobs', 'Mimic', ['Arcane', 'Construct'], '1,500,000 – 180,000,000'),
-  dungeonMob('Dungeon minibosses', 'Lost Adventurer', ['Humanoid', 'Arcane'], '40,000 – 160,000,000', { boss: true }),
+  dungeonMob('Dungeon minibosses', 'Lost Adventurer', ['Humanoid', 'Arcane'], '40,000 – 160,000,000', { boss: true, defense: 100 }),
   dungeonMob('Dungeon minibosses', 'Angry Archaeologist', ['Humanoid', 'Subterranean'], '8,500 – 18,000,000', { boss: true }),
 
+  // Open-world mobs: health and types from the wiki's mob pages (checked Oct 2026); defense 0 where
+  // none is listed. Fishing-only sea creatures and quest-only mobs are left out.
+  enemy('Hub', 'Graveyard Zombie', ['Undead'], 100),
+  enemy('Hub', 'Zombie Villager', ['Undead'], 120),
   enemy('Hub', 'Crypt Ghoul', ['Undead'], 2000),
+  enemy('Hub', 'Golden Ghoul', ['Undead'], 20000),
+  enemy('Hub', 'Wolf', ['Animal'], 500, { families: ['Wolf'] }),
+  enemy('Hub', 'Old Wolf', ['Animal'], 15000, { families: ['Wolf'] }),
+  enemy('Hub', 'Rat', ['Animal'], 5000),
+
+  // The Park's combat mobs are the spirit wolves of its three caves.
+  enemy('The Park', 'Pack Spirit', ['Animal', 'Arcane'], 6000, { families: ['Wolf'] }),
+  enemy('The Park', 'Howling Spirit', ['Animal', 'Arcane'], 7000, { families: ['Wolf'] }),
+  enemy('The Park', 'Soul of the Alpha', ['Animal', 'Arcane'], 31150, { boss: true, families: ['Wolf'] }),
+
+  enemy('Deep Caverns', 'Sneaky Creeper', ['Cubic'], 120),
+  enemy('Deep Caverns', 'Lapis Zombie', ['Undead'], 200),
+  enemy('Deep Caverns', 'Redstone Pigman', ['Undead'], 250),
+  enemy('Deep Caverns', 'Emerald Slime (small)', ['Cubic'], 80),
+  enemy('Deep Caverns', 'Emerald Slime (medium)', ['Cubic'], 150),
+  enemy('Deep Caverns', 'Miner Zombie (Diamond Reserve)', ['Undead'], 250),
+  enemy('Deep Caverns', 'Miner Skeleton (Diamond Reserve)', ['Skeletal'], 250),
+  enemy('Deep Caverns', 'Miner Zombie (Obsidian Sanctuary)', ['Undead'], 300),
+  enemy('Deep Caverns', 'Miner Skeleton (Obsidian Sanctuary)', ['Skeletal'], 300),
+
+  // The Barn and the Mushroom Desert.
+  enemy('Farming Islands', 'Chicken', ['Animal'], 20),
+  enemy('Farming Islands', 'Cow', ['Animal'], 50),
+  enemy('Farming Islands', 'Pig', ['Animal'], 50),
+  enemy('Farming Islands', 'Sheep', ['Animal'], 50),
+  enemy('Farming Islands', 'Mushroom Cow', ['Animal'], 50),
+  enemy('Farming Islands', 'Rabbit', ['Animal'], 130),
 
   ...[['Young', 7500000, 18], ['Old', 15000000, 18], ['Wise', 9000000, 25], ['Unstable', 9000000, 25],
     ['Strong', 9000000, 25], ['Protector', 9000000, 85], ['Superior', 12000000, 30]].map(([n, hp, def]) =>
     enemy('The End', `${n} Dragon`, ['Ender', 'Arcane', 'Airborne'], hp, { boss: true, defense: def })),
+  // The End island. Endermen, Zealots, Voidlings and Seers are endermen (katana/End Sword bonus);
+  // Endermites, the Obsidian Defender and the End Stone Protector are not.
+  enemy('The End', 'Enderman (Lv45)', ['Ender'], 4500, { families: ['Enderman'] }),
+  enemy('The End', 'Enderman (Lv51)', ['Ender'], 6000, { families: ['Enderman'] }),
+  enemy('The End', 'Enderman (Lv59)', ['Ender'], 9000, { families: ['Enderman'] }),
+  enemy('The End', 'Endermite', ['Arthropod', 'Ender'], 2000),
+  enemy('The End', 'Endermite (Dragon\'s Nest)', ['Arthropod', 'Ender'], 2300),
+  enemy('The End', 'Nest Endermite', ['Arthropod', 'Ender'], 4500),
+  enemy('The End', 'Seer', ['Ender'], 9500, { families: ['Enderman'] }),
+  enemy('The End', 'Obsidian Defender', ['Ender', 'Wither'], 10000),
   enemy('The End', 'Zealot', ['Ender'], 13000, { families: ['Enderman'] }),
+  enemy('The End', 'Special Zealot', ['Ender', 'Elusive'], 13000, { families: ['Enderman'] }),
+  enemy('The End', 'Zealot Bruiser', ['Ender'], 65000, { families: ['Enderman'] }),
+  enemy('The End', 'Voidling Fanatic', ['Ender'], 750000, { families: ['Enderman'] }),
+  enemy('The End', 'Voidling Extremist', ['Ender'], 8000000, { families: ['Enderman'] }),
+  enemy('The End', 'End Stone Protector', ['Construct', 'Ender'], 5000000, { boss: true, defense: 150 }),
 
   enemy('Crimson Isle', 'Kuudra', ['Infernal', 'Cubic'], 0, { boss: true }),
-  enemy('Crimson Isle', 'Ashfang', ['Infernal', 'Arcane'], 50000000, { boss: true }),
   enemy('Crimson Isle', 'Bladesoul', ['Wither', 'Skeletal', 'Arcane'], 50000000, { boss: true }),
   enemy('Crimson Isle', 'Barbarian Duke X', ['Humanoid', 'Animal'], 70000000, { boss: true }),
   enemy('Crimson Isle', 'Mage Outlaw', ['Humanoid', 'Arcane'], 70000000, { boss: true }),
+  enemy('Crimson Isle', 'Magma Boss', ['Cubic', 'Infernal'], 160000000, { boss: true }),
+  enemy('Crimson Isle', 'Vanquisher', ['Wither', 'Elusive'], 5000000, { boss: true }),
+  enemy('Crimson Isle', 'Exe', ['Arcane'], 100),
+  enemy('Crimson Isle', 'Wai', ['Arcane'], 100),
+  enemy('Crimson Isle', 'Ghast', ['Cubic', 'Airborne'], 100000),
+  enemy('Crimson Isle', 'Dive Ghast', ['Cubic', 'Airborne'], 100000),
+  enemy('Crimson Isle', 'Blaze', ['Infernal'], 250000),
+  enemy('Crimson Isle', 'Unstable Magma (Lv109)', ['Cubic', 'Infernal'], 240000),
+  enemy('Crimson Isle', 'Unstable Magma (Lv127)', ['Cubic', 'Infernal'], 400000),
+  enemy('Crimson Isle', 'Unstable Magma (Lv144)', ['Cubic', 'Infernal'], 600000),
+  enemy('Crimson Isle', 'Bezal', ['Infernal'], 300000),
+  enemy('Crimson Isle', 'Wither Skeleton', ['Wither', 'Skeletal'], 300000),
+  enemy('Crimson Isle', 'Wither Spectre', ['Wither', 'Arcane'], 300000),
+  enemy('Crimson Isle', 'Magma Cube', ['Cubic', 'Infernal'], 400000),
+  enemy('Crimson Isle', 'Flaming Spider', ['Arthropod', 'Infernal'], 500000),
+  enemy('Crimson Isle', 'Mutated Blaze', ['Infernal'], 500000),
+  enemy('Crimson Isle', 'Pack Magma Cube', ['Cubic', 'Infernal'], 600000),
+  enemy('Crimson Isle', 'Magma Cube Rider', ['Undead', 'Cubic', 'Infernal'], 750000),
+  enemy('Crimson Isle', 'Matcho', ['Humanoid', 'Infernal'], 750000),
+  enemy('Crimson Isle', 'Kada Knight', ['Animal', 'Undead'], 800000),
+  enemy('Crimson Isle', 'Mushroom Bull', ['Animal'], 1000000),
+  enemy('Crimson Isle', 'Krondor Necromancer Summon', ['Arcane', 'Undead'], 1000000, { defense: 500 }),
+  enemy('Crimson Isle', 'Barbarian', ['Humanoid', 'Animal'], 2000000),
+  enemy('Crimson Isle', 'Fire Mage', ['Humanoid', 'Arcane', 'Infernal'], 2000000),
+  enemy('Crimson Isle', 'Smoldering Blaze', ['Infernal', 'Subterranean'], 2000000),
+  enemy('Crimson Isle', 'Magma Glare', ['Cubic', 'Infernal'], 2000000),
+  enemy('Crimson Isle', 'Hellwisp', ['Cubic', 'Infernal', 'Subterranean'], 2500000),
+  enemy('Crimson Isle', 'Goliath Barbarian', ['Humanoid', 'Animal'], 5000000),
+  enemy('Crimson Isle', 'Krondor Necromancer', ['Humanoid', 'Arcane', 'Infernal'], 5000000),
+  enemy('Crimson Isle', 'Cinderbat', ['Animal', 'Infernal', 'Airborne'], 5000000),
+  enemy('Crimson Isle', 'Flare', ['Infernal'], 5000000),
+  enemy('Crimson Isle', 'Millennia-Aged Blaze', ['Infernal', 'Subterranean'], 12000000),
+  enemy('Crimson Isle', 'Barbarian Guard', [], 50000000),
+  enemy('Crimson Isle', 'Mage Guard', [], 50000000),
 
   enemy('Spider\'s Den', 'Arachne (Lesser)', ['Arthropod', 'Arcane'], 20000, { boss: true }),
   enemy('Spider\'s Den', 'Arachne (Greater)', ['Arthropod', 'Arcane'], 100000, { boss: true }),
+  // Spiders get stronger deeper in: Spider Mound has the weak end of each range, Arachne's Burrow
+  // the strong end.
+  ...[['Dasher Spider', 170, 360], ['Splitter Spider', 180, 440], ['Voracious Spider', 300, 510], ['Weaver Spider', 160, 370]]
+    .flatMap(([name, lo, hi]) => [
+      enemy('Spider\'s Den', `${name} (Spider Mound)`, ['Arthropod'], lo),
+      enemy('Spider\'s Den', `${name} (Arachne's Burrow)`, ['Arthropod'], hi)]),
+  enemy('Spider\'s Den', 'Spider Jockey (Spider Mound)', ['Arthropod', 'Skeletal'], 220),
+  enemy('Spider\'s Den', 'Spider Jockey (Arachne\'s Burrow)', ['Arthropod', 'Skeletal'], 500),
+  enemy('Spider\'s Den', 'Jockey Skeleton (Spider Mound)', ['Skeletal'], 250),
+  enemy('Spider\'s Den', 'Jockey Skeleton (Arachne\'s Burrow)', ['Skeletal'], 1000),
+  enemy('Spider\'s Den', 'Silverfish', ['Arthropod'], 50),
+  enemy('Spider\'s Den', 'Flint Skeleton', ['Skeletal'], 100),
+  enemy('Spider\'s Den', 'Rain Slime', ['Cubic'], 200),
+  enemy('Spider\'s Den', 'Toxic Rain Slime', ['Cubic'], 750),
+  enemy('Spider\'s Den', 'Cave Spider', ['Arthropod'], 600),
+  enemy('Spider\'s Den', 'Broodmother', ['Arthropod'], 3000),
+  enemy('Spider\'s Den', 'Arachne\'s Keeper', ['Arthropod'], 3000),
+  enemy('Spider\'s Den', 'Arachne\'s Brood (Lv34)', ['Arthropod'], 4000),
+  enemy('Spider\'s Den', 'Arachne\'s Brood (Lv62)', ['Arthropod'], 20000),
+
+  // Dwarven Mines, including the Goblin Raid goblins and the Glacite Mineshaft mobs. Left out:
+  // Golden Goblin, Star Sentry, Powder Ghast and Superprotectron, which die after a set number of
+  // hits rather than from damage.
+  enemy('Dwarven Mines', 'Weakling', ['Humanoid', 'Subterranean'], 200),
+  enemy('Dwarven Mines', 'Goblin', ['Humanoid', 'Subterranean'], 800),
+  enemy('Dwarven Mines', 'Knifethrower', ['Humanoid', 'Subterranean'], 800),
+  enemy('Dwarven Mines', 'Fireslinger', ['Humanoid', 'Subterranean'], 800),
+  enemy('Dwarven Mines', 'Glacite Walker', ['Glacial', 'Humanoid'], 888, { defense: 1000 }),
+  enemy('Dwarven Mines', 'Treasure Hoarder', ['Humanoid', 'Subterranean'], 15000),
+  enemy('Dwarven Mines', 'Pitfighter', ['Humanoid', 'Subterranean'], 30000),
+  enemy('Dwarven Mines', 'Murderlover', ['Humanoid', 'Subterranean'], 50000),
+  enemy('Dwarven Mines', 'Glacite Bowman', ['Glacial', 'Humanoid'], 750000, { defense: 1000 }),
+  enemy('Dwarven Mines', 'Glacite Mutt', ['Glacial', 'Animal'], 750000, { defense: 1000 }),
+  enemy('Dwarven Mines', 'Glacite Mage', ['Glacial', 'Humanoid'], 825000, { defense: 1000 }),
+  enemy('Dwarven Mines', 'Ghost', ['Arcane', 'Subterranean'], 1000000),
+
+  // Crystal Hollows (its goblins are the Dwarven Mines ones; the Deep Caverns mobs spawn here too).
+  // Left out: Kalhuiki Tribe Members/Elders (unkillable placeholder health), and Bal, Stoneworm and
+  // Scatha (shielded, die after a set number of hits).
+  enemy('Crystal Hollows', 'Butterfly', ['Arcane', 'Airborne', 'Subterranean'], 100),
+  enemy('Crystal Hollows', 'Fire Bat', ['Animal', 'Infernal', 'Airborne'], 12),
+  enemy('Crystal Hollows', 'Bald Blaze', ['Infernal'], 600),
+  enemy('Crystal Hollows', 'Thyst', ['Arthropod', 'Subterranean'], 5000),
+  enemy('Crystal Hollows', 'Sludge (small)', ['Cubic', 'Subterranean'], 5000),
+  enemy('Crystal Hollows', 'Sludge (medium)', ['Cubic', 'Subterranean'], 10000),
+  enemy('Crystal Hollows', 'Sludge (large)', ['Cubic', 'Subterranean'], 25000),
+  enemy('Crystal Hollows', 'Grunt', ['Humanoid'], 15000),
+  enemy('Crystal Hollows', 'Automaton', ['Subterranean', 'Construct', 'Arcane'], 15000),
+  enemy('Crystal Hollows', 'Executive Sebastian', ['Humanoid'], 18000),
+  enemy('Crystal Hollows', 'Executive Wendy', ['Humanoid'], 18000),
+  enemy('Crystal Hollows', 'Executive Viper', ['Humanoid'], 18000),
+  enemy('Crystal Hollows', 'Yog', ['Cubic', 'Infernal', 'Subterranean'], 35000),
+  enemy('Crystal Hollows', 'Key Guardian', ['Undead', 'Subterranean'], 250000),
+  enemy('Crystal Hollows', 'Kalhuiki Youngling', ['Humanoid'], 1000000),
+  enemy('Crystal Hollows', 'Boss Corleone', ['Humanoid', 'Subterranean'], 1000000, { boss: true }),
+
+  // Sea creatures (fished up; Soul Whip / Flaming Flay bonus). Water first, then lava; left out:
+  // Grinch, Reindrake and Puddle Jumper (die after a set number of hits) and Frosty (no stats).
+  ...[
+    ['Squid', ['Aquatic', 'Animal'], 50], ['Sea Walker', ['Aquatic', 'Undead'], 100],
+    ['Frozen Steve', ['Aquatic', 'Frozen', 'Humanoid'], 150], ['Trash Gobbler', ['Aquatic', 'Arthropod', 'Animal'], 2000],
+    ['Dumpster Diver', ['Aquatic', 'Humanoid'], 2500], ['Nurse Shark', ['Aquatic', 'Animal'], 2500],
+    ['Frog Man', ['Aquatic', 'Animal', 'Humanoid'], 2500], ['Bogged', ['Aquatic', 'Skeletal'], 3000],
+    ['Jumpin\' Jack', ['Aquatic', 'Spooky'], 3500], ['Scarecrow', ['Aquatic', 'Spooky'], 4500],
+    ['Tadgang', ['Aquatic', 'Animal'], 5000], ['Sea Witch', ['Aquatic', 'Humanoid', 'Arcane'], 6000],
+    // Mithril Grubbers: fished in the Dwarven Mines' hidden Abandoned Quarry, in four sizes.
+    ['Mithril Grubber', ['Aquatic', 'Arthropod'], 6000], ['Medium Mithril Grubber', ['Aquatic', 'Arthropod'], 7500],
+    ['Large Mithril Grubber', ['Aquatic', 'Arthropod'], 10000], ['Bloated Mithril Grubber', ['Aquatic', 'Arthropod'], 15000],
+    ['Oasis Sheep', ['Aquatic', 'Animal'], 6000],
+    ['Oasis Rabbit', ['Aquatic', 'Animal'], 6000], ['Inkling', ['Aquatic', 'Animal'], 6500],
+    ['Sea Archer', ['Aquatic', 'Skeletal'], 7000], ['Wetwing', ['Aquatic', 'Undead', 'Animal'], 8000],
+    ['Haggard', ['Aquatic', 'Skeletal'], 10000], ['Atoll Croaker', ['Aquatic', 'Animal'], 15000],
+    ['Banshee', ['Aquatic', 'Humanoid'], 17500], ['Rider of the Deep', ['Aquatic', 'Undead', 'Animal'], 20000],
+    ['Bayou Sludge', ['Aquatic', 'Cubic'], 20000], ['Ent', ['Aquatic', 'Woodland'], 25000],
+    ['Brineling', ['Aquatic', 'Animal'], 25000], ['Lotus Guardian', ['Aquatic', 'Construct'], 25000],
+    ['Blue Shark', ['Aquatic', 'Animal'], 25000], ['Catfish', ['Aquatic', 'Animal'], 26000],
+    ['Carrot King', ['Aquatic', 'Animal'], 32000], ['Nightmare', ['Aquatic', 'Spooky', 'Undead'], 35000],
+    ['Snapping Turtle', ['Aquatic', 'Animal'], 35000], ['gorF', ['Aquatic', 'Animal', 'Arcane'], 40000],
+    ['Sprawl', ['Aquatic', 'Airborne'], 50000], ['Werewolf', ['Aquatic', 'Spooky', 'Animal'], 50000],
+    ['Water Worm', ['Aquatic', 'Subterranean'], 50000], ['Agarimoo', ['Aquatic', 'Animal'], 55000],
+    ['Sea Leech', ['Aquatic', 'Animal'], 60000], ['Drowned Captain', ['Aquatic', 'Undead'], 60000],
+    ['Poisoned Water Worm', ['Aquatic', 'Subterranean', 'Arthropod'], 75000], ['Guardian Defender', ['Aquatic', 'Arcane'], 76000],
+    ['Torrid', ['Aquatic', 'Airborne'], 100000], ['Deep Sea Protector', ['Aquatic', 'Construct'], 150000],
+    ['Silkbreeze', ['Aquatic', 'Airborne', 'Elusive'], 250000], ['Tiger Shark', ['Aquatic', 'Animal'], 250000],
+    ['Nutcracker', ['Aquatic', 'Frozen', 'Humanoid'], 400000, 100], ['Water Hydra', ['Aquatic', 'Humanoid', 'Elusive'], 500000],
+    ['Giant Isopod', ['Aquatic', 'Arthropod', 'Elusive'], 500000], ['Manta Ray', ['Aquatic', 'Animal'], 500000],
+    ['Alligator', ['Aquatic', 'Animal', 'Elusive'], 600000], ['The Loch Emperor', ['Aquatic', 'Skeletal', 'Elusive', 'Arcane', 'Humanoid'], 800000],
+    ['Phantom Fisher', ['Aquatic', 'Spooky', 'Elusive', 'Arcane'], 1000000], ['Great White Shark', ['Aquatic', 'Animal', 'Elusive'], 1500000],
+    ['Nessie', ['Aquatic', 'Animal', 'Elusive'], 2000000], ['Yeti', ['Aquatic', 'Frozen', 'Elusive', 'Humanoid'], 2000000],
+    ['Abyssal Miner', ['Aquatic', 'Subterranean', 'Elusive', 'Undead'], 2000000], ['Grim Reaper', ['Aquatic', 'Spooky', 'Elusive', 'Arcane'], 3000000],
+    ['Blue Ringed Octopus', ['Aquatic', 'Animal', 'Elusive'], 4000000], ['Frog Prince', ['Aquatic', 'Animal', 'Elusive'], 10000000],
+    ['Titanoboa', ['Aquatic', 'Animal', 'Elusive'], 45000000], ['Wiki Tiki', ['Aquatic', 'Construct', 'Elusive', 'Shielded'], 75000000],
+    ['Stridersurfer', ['Magmatic', 'Undead', 'Woodland'], 20000], ['Fried Chicken', ['Magmatic', 'Animal'], 65000],
+    ['Volcanic Snail', ['Magmatic', 'Animal'], 100000], ['Flaming Worm', ['Magmatic', 'Arthropod'], 100000],
+    ['Lava Blaze', ['Magmatic', 'Infernal'], 400000], ['Lava Pigman', ['Magmatic', 'Undead'], 450000],
+    ['Magma Slug', ['Magmatic', 'Cubic'], 500000], ['Moogma', ['Magmatic', 'Animal'], 750000],
+    ['Lava Leech', ['Magmatic', 'Arthropod'], 1000000], ['Lava Flame', ['Magmatic', 'Infernal'], 1000000],
+    ['Fireproof Witch', ['Magmatic', 'Humanoid', 'Arcane'], 1000000], ['Pyroclastic Worm', ['Magmatic', 'Cubic'], 1200000],
+    ['Magma Pillar', ['Magmatic', 'Cubic'], 1250000], ['Fire Eel', ['Magmatic', 'Animal'], 2000000],
+    ['Taurus', ['Magmatic', 'Humanoid', 'Animal'], 3000000], ['Fiery Scuttler', ['Magmatic', 'Animal', 'Elusive'], 10000000],
+    ['Thunder', ['Magmatic', 'Arcane', 'Elusive'], 35000000], ['Lord Jawbus', ['Magmatic', 'Construct', 'Elusive'], 100000000],
+    ['Ragnarok', ['Magmatic', 'Skeletal', 'Elusive'], 125000000], ['Plhlegblast', ['Magmatic', 'Elusive', 'Animal'], 500000000],
+  ].map(([name, mobs, hp, defense = 0]) => enemy('Sea creatures', name, mobs, hp, { defense, families: ['Sea creature'] })),
 
   enemy('Other', 'Minos Inquisitor', ['Mythological', 'Humanoid', 'Elusive'], 80000000),
-  enemy('Other', 'Lord Jawbus', ['Magmatic', 'Construct', 'Elusive'], 100000000, { families: ['Sea creature'] }),
 ];
 
 // ---------- Enchantments ----------

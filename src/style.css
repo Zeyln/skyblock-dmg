@@ -532,6 +532,8 @@ button.link:hover { color: var(--crit); }
 .location .badge.master { background: var(--crit-soft); color: var(--crit-ink); }
 .location .hint { flex-basis: 100%; margin: 0; }
 .location .class-row { flex-basis: 100%; }
+/* Floor picker for regular dungeon mobs: a small dropdown (its list is a two-column grid). */
+.location .floor-field { width: 150px; }
 .segmented { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--chip); }
 .segmented label { padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .segmented input { display: none; }
@@ -630,6 +632,14 @@ table.rows input { width: 100%; }
   padding: 8px 10px 4px; font-size: 10.5px; font-weight: 700; color: var(--faint);
   text-transform: uppercase; letter-spacing: .07em; position: sticky; top: -6px; background: var(--glass-strong);
 }
+/* Grid lists (combo columns option): options side by side; wide options and group headers take a
+   whole row. */
+.combo-list.is-grid { display: grid; column-gap: 4px; }
+.combo-list.is-grid .combo-group, .combo-opt.is-wide { grid-column: 1 / -1; }
+/* Collapsed categories (combo submenus): name, count and an arrow. Their options open in a
+   second list (.combo-fly) beside the main one. */
+.combo-cat .combo-note { margin-left: auto; }
+.combo-cat .chev { margin-left: 8px; }
 .combo-opt {
   display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 9px; cursor: pointer;
   font-size: 13px; color: var(--text);

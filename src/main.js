@@ -19,7 +19,7 @@ import {
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
   ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, TARGET_FAMILIES, weaponMultipliers,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
-  DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode,
+  DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
 
 const STATE_KEY = 'dpscalc.state.v1';
@@ -927,14 +927,45 @@ function chooseEnemy(name) {
     Object.assign(state.target, {
       mobs: [...e.mobs], families: [...e.families], boss: e.boss, maxHp: e.maxHp || undefined, defense: e.defense, hpPct: 100,
     });
+    syncDungeonMode(); // picks a floor the mob spawns on
+    applyFloorStats(e);
   }
   rerenderForm();
 }
 
+// Regular dungeon mobs: fill Target max HP and defense from the chosen floor (DUNGEON_FLOORS).
+function applyFloorStats(e) {
+  const stats = floorStats(e, state.dungeonFloor);
+  if (stats) Object.assign(state.target, { maxHp: stats.hp, defense: stats.defense });
+}
+
+// Dungeon floors for regular dungeon mobs: Entrance, then each Catacombs floor next to its Master
+// Mode counterpart (the dropdown shows them as a two-column grid).
+const FLOORS = ['E', ...[1, 2, 3, 4, 5, 6, 7].flatMap((n) => [`F${n}`, `M${n}`])];
+const floorName = (f) => (f === 'E' ? 'Entrance' : f);
+const floorNumber = (f) => (f === 'E' ? 0 : Number(f.slice(1)));
+// A floor the mob spawns on, as close as possible to `floor`: same mode first (the highest one
+// up to it, else the lowest above), then the other mode.
+function nearestFloor(e, floor) {
+  const master = floor.startsWith('M');
+  const have = FLOORS.filter((f) => floorStats(e, f));
+  const same = have.filter((f) => f.startsWith('M') === master);
+  const pool = same.length ? same : have;
+  const below = pool.filter((f) => floorNumber(f) <= floorNumber(floor));
+  return below.length ? below[below.length - 1] : pool[0];
+}
+
 // The chosen enemy decides where the fight happens; only custom targets are free.
-// Regular dungeon mobs/minibosses ('either') keep the user's Catacombs/Master Mode choice.
+// Regular dungeon mobs/minibosses ('either') are fought on the floor the user picks, which decides
+// Catacombs or Master Mode (an unset floor follows the current mode: F7 or M7).
 function syncDungeonMode() {
-  state.dungeonMode = enemyDungeonMode(ENEMIES.find((x) => x.name === state.target.enemy), state.dungeonMode);
+  const e = ENEMIES.find((x) => x.name === state.target.enemy);
+  state.dungeonMode = enemyDungeonMode(e, state.dungeonMode);
+  if (e?.dungeon === 'either') {
+    if (!FLOORS.includes(state.dungeonFloor)) state.dungeonFloor = state.dungeonMode === 'master' ? 'M7' : 'F7';
+    if (!floorStats(e, state.dungeonFloor)) state.dungeonFloor = nearestFloor(e, state.dungeonFloor);
+    state.dungeonMode = state.dungeonFloor.startsWith('M') ? 'master' : 'catacombs';
+  }
 }
 
 // In-dungeon switch: drives star bonuses, the Catacombs-level boost and class passives.
@@ -956,12 +987,19 @@ function dungeonControls() {
         'Master Mode') : '',
     ];
   } else if (lock === 'either') {
-    // Regular dungeon mob: always in a dungeon, user picks the mode.
+    // Regular dungeon mob: always in a dungeon, user picks the floor (F = Catacombs, M = Master Mode).
+    // Floors the mob doesn't spawn on are greyed out.
+    const floorOpts = FLOORS.map((f) => ({ value: f, label: f === 'E' ? 'Entrance (F0)' : f, wide: f === 'E', disabled: !floorStats(e, f) }));
     controls = [
-      h('span', { class: 'badge dungeon' }, 'In dungeon'),
-      h('div', { class: 'segmented' },
-        [['catacombs', 'Catacombs'], ['master', 'Master Mode']].map(([mode, label]) => h('label', {},
-          h('input', { type: 'radio', name: 'dungeon-mode', checked: state.dungeonMode === mode, onchange: () => set(mode) }), label))),
+      h('span', { class: `badge dungeon${state.dungeonMode === 'master' ? ' master' : ''}` },
+        state.dungeonMode === 'master' ? 'In dungeon — Master Mode' : 'In dungeon — Catacombs'),
+      h('div', { class: 'field floor-field' }, h('span', { class: 'field-label' }, 'Floor'),
+        combo(floorOpts, state.dungeonFloor, (f) => {
+          state.dungeonFloor = f;
+          state.dungeonMode = f.startsWith('M') ? 'master' : 'catacombs';
+          applyFloorStats(e);
+          rerenderForm();
+        }, { searchable: false, columns: 2, ariaLabel: 'Floor' })),
     ];
   } else {
     const text = { outside: 'Outside dungeons', floor: 'In dungeon — Catacombs', master: 'In dungeon — Master Mode' }[lock];
@@ -1016,14 +1054,17 @@ function targetSection() {
       search: `${g} ${e.mobs.join(' ')} ${e.families.join(' ')}`,
     })))];
   const enemySelect = actionSelect(null, enemyOpts, state.target.enemy, chooseEnemy,
-    { searchable: true, placeholder: 'Search enemy, area or mob type…', ariaLabel: 'Enemy' });
+    { searchable: true, submenus: true, placeholder: 'Search enemy, area or mob type…', ariaLabel: 'Enemy' });
   const chosen = ENEMIES.find((e) => e.name === state.target.enemy);
+  const onFloor = floorStats(chosen, state.dungeonFloor); // regular dungeon mobs: stats on the chosen floor
   const desc = chosen ? joinParts(chosen.mobs.join(', '), chosen.boss ? 'boss' : '',
-    chosen.maxHp ? `${fmt(chosen.maxHp)} HP` : chosen.hpRange ? `${chosen.hpRange} HP` : '',
-    chosen.defense ? `${fmt(chosen.defense)} defense` : '') : '';
+    onFloor ? `${fmt(onFloor.hp)} HP on ${floorName(state.dungeonFloor)}`
+      : chosen.maxHp ? `${fmt(chosen.maxHp)} HP` : chosen.hpRange ? `${chosen.hpRange} HP` : '',
+    (onFloor ? onFloor.defense : chosen.defense) ? `${fmt(onFloor ? onFloor.defense : chosen.defense)} defense` : '') : '';
   const summary = () => {
     const cls = DUNGEON_CLASSES.find((c) => c.id === state.dungeonClass.id);
-    const loc = { none: 'outside dungeons', catacombs: 'Catacombs', master: 'Master Mode' }[state.dungeonMode] || '';
+    const loc = chosen?.dungeon === 'either' ? floorName(state.dungeonFloor)
+      : { none: 'outside dungeons', catacombs: 'Catacombs', master: 'Master Mode' }[state.dungeonMode] || '';
     return joinParts(state.target.enemy || 'Custom target', loc,
       cls && state.dungeonMode !== 'none' ? `${cls.name} ${state.dungeonClass.level ?? 0}` : '');
   };

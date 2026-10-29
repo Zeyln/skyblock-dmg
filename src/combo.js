@@ -28,13 +28,18 @@ let openCombo = null; // only one list open at a time
 let uid = 0;
 
 /**
- * options: [{ value, label, rich?, node?, group?, cls?, prefix?, prefixCls?, note?, suffix?, disabled?, search? }]
+ * options: [{ value, label, rich?, node?, group?, cls?, prefix?, prefixCls?, note?, suffix?, disabled?, search?, wide? }]
  *   label is plain text (used for search, type-ahead and the text box); rich is optional parsed §
  *   formatting (see mctext.js) and node() an optional custom display (e.g. star icons).
  * value: currently selected value ('' = none)
  * onSelect(value): called with the chosen option's value
- * opts: { placeholder, searchable, disabled, ariaLabel, className, display(option) -> Node | string }
+ * opts: { placeholder, searchable, disabled, ariaLabel, className, columns, submenus, display(option) -> Node | string }
  *   className is added to both the control and its open list (e.g. 'mc' for the Minecraft font).
+ *   columns lays the open list out as a grid (wide options take a whole row); the arrow keys then
+ *   move up/down between rows and left/right within a row.
+ *   submenus collapses grouped options: until something is typed, the list shows the ungrouped
+ *   options and one row per group; hovering/clicking a group (or Right/Enter on it) opens its
+ *   options in a second list beside the first (Left/Esc goes back). Typing searches everything.
  */
 export function combo(options, value, onSelect, opts = {}) {
   const id = `combo-${++uid}`;
@@ -93,9 +98,50 @@ export function combo(options, value, onSelect, opts = {}) {
   let active = -1;
   let typeahead = '';
   let typeaheadTimer = 0;
+  // Submenus: the typed search, and the open group's list ("flyout") beside the main list.
+  let query = '';
+  let fly = null;
+  let flyRow = -1;        // index (in filtered) of the group row whose flyout is open
+  let flyActive = -1;     // highlighted option in the flyout
+  let inFly = false;      // keyboard focus is in the flyout
+  let hoverTimer = 0;
+
+  const submenuMode = () => opts.submenus && !query;
+  function collapsedRows() {
+    const rows = [];
+    const groups = new Map();
+    for (const o of options) {
+      if (!o.group) { rows.push(o); continue; }
+      let g = groups.get(o.group);
+      if (!g) {
+        g = { value: `group:${o.group}`, label: o.group, isGroup: true, items: [] };
+        groups.set(o.group, g);
+        rows.push(g);
+      }
+      g.items.push(o);
+    }
+    return rows;
+  }
+  const isCurrent = (o) => String(o.value) === String(value ?? '');
+  // Row to highlight on opening: the current option, or the group that holds it.
+  const rowActive = () => Math.max(0, filtered.findIndex((r) => (r.isGroup ? r.items.some(isCurrent) : isCurrent(r))));
 
   const focusEl = () => input || trigger;
   const setExpanded = (v) => focusEl().setAttribute('aria-expanded', String(v));
+
+  // One option row. elId: its element id; onHover: called when the mouse moves over it.
+  function optionEl(o, elId, onHover) {
+    return h('div', {
+      id: elId, role: 'option', class: `combo-opt${o.wide ? ' is-wide' : ''}${isCurrent(o) ? ' is-selected' : ''}${o.disabled ? ' is-disabled' : ''}`,
+      'aria-selected': String(isCurrent(o)),
+      onmousedown: (e) => { e.preventDefault(); if (!o.disabled) choose(o); },
+      onmousemove: onHover,
+    }, o.prefix ? h('span', { class: `combo-prefix ${o.prefixCls || ''}` }, o.prefix) : '',
+    h('span', { class: `combo-opt-label ${o.cls || ''}` },
+      o.node ? o.node() : o.rich ? renderFormatted(o.rich, input?.value) : highlight(plainLabel(o), input?.value)),
+    o.suffix ? h('span', { class: 'combo-suffix' }, o.suffix) : '',
+    o.note ? h('span', { class: 'combo-note' }, o.note) : '');
+  }
 
   function render() {
     const list = pop.querySelector('.combo-list');
@@ -103,20 +149,33 @@ export function combo(options, value, onSelect, opts = {}) {
     const shown = filtered.slice(0, MAX_RENDERED);
     let group = null;
     shown.forEach((o, i) => {
+      const hover = () => {
+        if (active !== i || inFly) { active = i; inFly = false; paintActive(); }
+        // With a flyout open, switch only after a short pause, so moving the mouse diagonally
+        // towards the flyout across other rows doesn't swap it.
+        clearTimeout(hoverTimer);
+        const change = o.isGroup ? flyRow !== i : !!fly;
+        if (!change) return;
+        const act = () => { if (pop && active === i) { if (o.isGroup) openFly(i, false); else { closeFly(); paintActive(); } } };
+        if (fly) hoverTimer = setTimeout(act, 150); else act();
+      };
+      if (o.isGroup) {
+        // Collapsed group: its name, how many options it holds and an arrow; opens the flyout.
+        list.append(h('div', {
+          id: `${id}-opt-${i}`, role: 'option', 'aria-haspopup': 'listbox',
+          class: `combo-opt combo-cat${o.items.some(isCurrent) ? ' is-selected' : ''}`,
+          onmousedown: (e) => { e.preventDefault(); openFly(i, false); },
+          onmousemove: hover,
+        }, h('span', { class: 'combo-opt-label' }, o.label),
+        h('span', { class: 'combo-note' }, String(o.items.length)),
+        h('span', { class: 'chev', 'aria-hidden': 'true' })));
+        return;
+      }
       if (o.group && o.group !== group) {
         group = o.group;
         list.append(h('div', { class: 'combo-group', role: 'presentation' }, group));
       }
-      list.append(h('div', {
-        id: `${id}-opt-${i}`, role: 'option', class: `combo-opt${i === active ? ' is-active' : ''}${String(o.value) === String(value ?? '') ? ' is-selected' : ''}${o.disabled ? ' is-disabled' : ''}`,
-        'aria-selected': String(String(o.value) === String(value ?? '')),
-        onmousedown: (e) => { e.preventDefault(); if (!o.disabled) choose(o); },
-        onmousemove: () => { if (active !== i) { active = i; paintActive(); } },
-      }, o.prefix ? h('span', { class: `combo-prefix ${o.prefixCls || ''}` }, o.prefix) : '',
-      h('span', { class: `combo-opt-label ${o.cls || ''}` },
-        o.node ? o.node() : o.rich ? renderFormatted(o.rich, input?.value) : highlight(plainLabel(o), input?.value)),
-      o.suffix ? h('span', { class: 'combo-suffix' }, o.suffix) : '',
-      o.note ? h('span', { class: 'combo-note' }, o.note) : ''));
+      list.append(optionEl(o, `${id}-opt-${i}`, hover));
     });
     if (!shown.length) list.append(h('div', { class: 'combo-empty' }, 'No matches'));
     if (filtered.length > MAX_RENDERED) {
@@ -128,7 +187,8 @@ export function combo(options, value, onSelect, opts = {}) {
   function paintActive() {
     if (!pop) return;
     pop.querySelectorAll('.combo-opt').forEach((el, i) => el.classList.toggle('is-active', i === active));
-    const el = pop.querySelector(`#${id}-opt-${active}`);
+    fly?.querySelectorAll('.combo-opt').forEach((el, j) => el.classList.toggle('is-active', j === flyActive));
+    const el = inFly ? fly?.querySelector(`#${id}-fly-${flyActive}`) : pop.querySelector(`#${id}-opt-${active}`);
     if (el) {
       el.scrollIntoView({ block: 'nearest' });
       focusEl().setAttribute('aria-activedescendant', el.id);
@@ -141,6 +201,48 @@ export function combo(options, value, onSelect, opts = {}) {
     const r = trigger.getBoundingClientRect();
     const top = topEdge(r);
     return { r, top, above: r.top - top - GAP - EDGE, below: window.innerHeight - r.bottom - GAP - EDGE };
+  }
+
+  // Open the flyout of the group row at index i (focus: move keyboard focus into it).
+  function openFly(i, focus) {
+    const row = filtered[i];
+    if (!row?.isGroup) return;
+    if (flyRow !== i) {
+      closeFly();
+      flyRow = i;
+      fly = h('div', { class: `combo-pop combo-fly glass${opts.className ? ` ${opts.className}` : ''}`, role: 'listbox', id: `${id}-fly`, 'aria-label': row.label, onmousedown: (e) => e.preventDefault() },
+        h('div', { class: 'combo-list' }, row.items.map((o, j) => optionEl(o, `${id}-fly-${j}`, () => {
+          clearTimeout(hoverTimer); // reached the flyout: keep it, and keep its group highlighted
+          if (flyActive !== j || !inFly || active !== i) { flyActive = j; inFly = true; active = i; paintActive(); }
+        }))));
+      document.body.append(fly);
+      flyActive = -1;
+      positionFly();
+    }
+    inFly = focus;
+    if (focus) flyActive = Math.max(0, row.items.findIndex(isCurrent));
+    paintActive();
+  }
+  function closeFly() {
+    clearTimeout(hoverTimer);
+    fly?.remove();
+    fly = null;
+    flyRow = -1;
+    flyActive = -1;
+    inFly = false;
+  }
+  // Beside the main list (right, or left if there's no room), level with its group row.
+  function positionFly() {
+    if (!fly || !pop) return;
+    const p = pop.getBoundingClientRect();
+    const row = pop.querySelector(`#${id}-opt-${flyRow}`)?.getBoundingClientRect() || p;
+    const top = topEdge(p) + EDGE;
+    fly.style.maxWidth = `${Math.min(MAX_WIDTH, window.innerWidth - EDGE * 2)}px`;
+    fly.style.maxHeight = `${Math.max(0, Math.min(MAX_HEIGHT * 1.5, window.innerHeight - top - EDGE))}px`;
+    let left = p.right + 4;
+    if (left + fly.offsetWidth > window.innerWidth - EDGE) left = Math.max(EDGE, p.left - 4 - fly.offsetWidth);
+    fly.style.left = `${left}px`;
+    fly.style.top = `${Math.max(top, Math.min(row.top - 6, window.innerHeight - EDGE - fly.offsetHeight))}px`;
   }
 
   // The list's full height (capped), i.e. how much room it would like.
@@ -158,7 +260,10 @@ export function combo(options, value, onSelect, opts = {}) {
       pop.style.width = '';
       pop.style.minWidth = `${Math.min(Math.max(r.width, 240), window.innerWidth - EDGE * 2)}px`;
       pop.style.maxWidth = `${Math.min(Math.max(r.width, MAX_WIDTH), window.innerWidth - EDGE * 2)}px`;
-      pop.style.width = `${pop.offsetWidth}px`;
+      // The content width doesn't count the space reserved for the scrollbar; add it back.
+      const cs = getComputedStyle(pop);
+      const scrollbar = pop.offsetWidth - pop.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+      pop.style.width = `${Math.min(pop.offsetWidth + Math.max(0, scrollbar), window.innerWidth - EDGE * 2)}px`;
     }
     pop.style.left = `${Math.max(EDGE, Math.min(r.left, window.innerWidth - pop.offsetWidth - EDGE))}px`;
     pop.style.maxHeight = `${Math.max(0, Math.min(MAX_HEIGHT, dropUp ? above : below))}px`;
@@ -169,17 +274,19 @@ export function combo(options, value, onSelect, opts = {}) {
       pop.style.bottom = '';
       pop.style.top = `${r.bottom + GAP}px`;
     }
+    positionFly();
   }
 
   function open() {
     if (pop) return;
     if (openCombo) openCombo.close();
     openCombo = { close };
-    filtered = options;
-    active = Math.max(0, filtered.findIndex((o) => String(o.value) === String(value ?? '')));
+    query = '';
+    filtered = opts.submenus ? collapsedRows() : options;
+    active = rowActive();
     // mousedown inside the list (incl. its scrollbar) must not blur the trigger and close the list.
     pop = h('div', { class: `combo-pop glass${opts.className ? ` ${opts.className}` : ''}`, role: 'listbox', id: `${id}-list`, onmousedown: (e) => e.preventDefault() },
-      h('div', { class: 'combo-list' }));
+      h('div', { class: `combo-list${opts.columns ? ' is-grid' : ''}`, style: opts.columns ? `grid-template-columns: repeat(${opts.columns}, minmax(0, 1fr))` : null }));
     document.body.append(pop);
     render();
     // Field hidden under the header, or too close to an edge for the list to fit on either side
@@ -197,6 +304,7 @@ export function combo(options, value, onSelect, opts = {}) {
 
   function close(restore = true) {
     if (!pop) return;
+    closeFly();
     pop.remove();
     pop = null;
     if (openCombo?.close === close) openCombo = null;
@@ -210,7 +318,7 @@ export function combo(options, value, onSelect, opts = {}) {
   }
 
   function outside(e) {
-    if (!root.contains(e.target) && !pop?.contains(e.target)) close();
+    if (!root.contains(e.target) && !pop?.contains(e.target) && !fly?.contains(e.target)) close();
   }
 
   function choose(o) {
@@ -224,9 +332,36 @@ export function combo(options, value, onSelect, opts = {}) {
 
   function filter(text) {
     const q = text.trim().toLowerCase();
+    query = q;
+    closeFly();
+    if (submenuMode()) { filtered = collapsedRows(); active = rowActive(); render(); return; }
     filtered = q ? options.filter((o) => `${plainLabel(o)} ${o.search || ''}`.toLowerCase().includes(q)) : options;
     active = filtered.length ? 0 : -1;
     render();
+  }
+
+  // Keyboard inside the flyout (submenus): Up/Down move, Enter picks, Left/Esc go back.
+  // Returns true when it handled the key.
+  function onFlyKey(e) {
+    const items = filtered[flyRow].items;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const d = e.key === 'ArrowDown' ? 1 : -1;
+      let j = flyActive;
+      for (let n = 0; n < items.length; n++) { j = (j + d + items.length) % items.length; if (!items[j].disabled) break; }
+      flyActive = j;
+      paintActive();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (items[flyActive] && !items[flyActive].disabled) choose(items[flyActive]);
+    } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      closeFly();
+      paintActive();
+    } else if (e.key === 'Tab') {
+      close();
+    } else return false;
+    return true;
   }
 
   function move(delta) {
@@ -240,10 +375,40 @@ export function combo(options, value, onSelect, opts = {}) {
     paintActive();
   }
 
+  // Grid lists: the option visually above or below the active one (nearest row, then column).
+  function moveRow(dir) {
+    const els = [...pop.querySelectorAll('.combo-opt')];
+    const cur = els[active]?.getBoundingClientRect();
+    if (!cur) return move(dir);
+    let best = -1;
+    let bestScore = Infinity;
+    els.forEach((el, i) => {
+      if (filtered[i].disabled) return;
+      const r = el.getBoundingClientRect();
+      const gap = dir > 0 ? r.top - cur.bottom : cur.top - r.bottom;
+      if (gap < -1) return;
+      const score = gap * 1000 + Math.abs((r.left + r.right) / 2 - (cur.left + cur.right) / 2);
+      if (score < bestScore) { bestScore = score; best = i; }
+    });
+    if (best >= 0) { active = best; paintActive(); }
+  }
+
   function onKey(e) {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (pop && fly && inFly && onFlyKey(e)) return;
+    if (pop && submenuMode() && filtered[active]?.isGroup && (e.key === 'ArrowRight' || e.key === 'Enter')) {
       e.preventDefault();
-      if (!pop) open(); else move(e.key === 'ArrowDown' ? 1 : -1);
+      openFly(active, true);
+      return;
+    }
+    if (pop && fly && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFly(); paintActive(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (fly) closeFly();
+      e.preventDefault();
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      if (!pop) open(); else if (opts.columns) moveRow(dir); else move(dir);
+    } else if (opts.columns && pop && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      move(e.key === 'ArrowRight' ? 1 : -1);
     } else if (e.key === 'Home' && pop && !input) {
       e.preventDefault(); active = 0; paintActive();
     } else if (e.key === 'End' && pop && !input) {

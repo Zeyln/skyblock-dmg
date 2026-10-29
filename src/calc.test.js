@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { calculate, itemStats, rarityIndex, reforgeTable } from './calc.js';
 import {
   powerMultiplier, combatWarriorBonus, POWERS, greedBonus, enchantConflict, floorLabel, catacombsBoost,
-  ENEMIES, MOB_TYPES, enemyDungeonMode,
+  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
 import { petNumbers, cleanLore } from './data/pets.js';
 import { parseFormatting, stripFormatting, hasFormatting, MC_COLORS } from './mctext.js';
@@ -423,6 +423,29 @@ describe('enemy presets', () => {
       if (e.dungeon === 'either') expect(e.hpRange).toBeTruthy();
     }
     expect(find('Crypt Ghoul').dungeon).toBeUndefined(); // Hub mob, not a dungeon mob
+  });
+
+  it('regular dungeon mobs have per-floor stats inside their HP range', () => {
+    const FLOORS = ['E', ...[1, 2, 3, 4, 5, 6, 7].flatMap((n) => [`F${n}`, `M${n}`])];
+    for (const e of ENEMIES.filter((x) => x.dungeon === 'either')) {
+      const floors = Object.keys(e.floors || {});
+      expect(floors.length, e.name).toBeGreaterThan(0);
+      for (const f of floors) expect(FLOORS, `${e.name} ${f}`).toContain(f);
+      const [lo, hi] = e.hpRange.split('–').map((v) => Number(v.replace(/[^0-9]/g, '')));
+      for (const f of floors) {
+        const { hp } = floorStats(e, f);
+        expect(hp, `${e.name} ${f}`).toBeGreaterThanOrEqual(lo);
+        expect(hp, `${e.name} ${f}`).toBeLessThanOrEqual(hi);
+      }
+    }
+  });
+
+  it('floor stats give health and defense, or nothing where the mob does not spawn', () => {
+    expect(floorStats(find('Zombie Soldier'), 'M7')).toEqual({ hp: 36000000, defense: 0 });
+    expect(floorStats(find('Lost Adventurer'), 'F5')).toEqual({ hp: 302500, defense: 100 });
+    expect(floorStats(find('Angry Archaeologist'), 'M3')).toEqual({ hp: 3000000, defense: 1050 });
+    expect(floorStats(find('Zombie Lord'), 'F3')).toBeNull();
+    expect(floorStats(find('Revenant Horror I'), 'F7')).toBeNull();
   });
 });
 
