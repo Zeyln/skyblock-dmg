@@ -1,5 +1,5 @@
 import {
-  BASE_PLAYER_STATS, ENCHANTS, weaponMultipliers, SWORD_REFORGES, BOW_REFORGES, ARMOR_REFORGES,
+  BASE_PLAYER_STATS, ENCHANTS, weaponMultipliers, SWORD_REFORGES, BOW_REFORGES, ARMOR_REFORGES, REFORGE_EXTRAS,
   RARITIES, GEMS, gemValue, PROGRESSION_ITEMS, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
   ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, WEAPON_ABILITIES, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
@@ -7,6 +7,7 @@ import {
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
 } from './data/mechanics.js';
+import { REFORGE_STONES } from './data/reforgeStones.js';
 import { applyPet } from './data/pets.js';
 import { detectSets, evaluateSets } from './data/sets.js';
 
@@ -71,10 +72,29 @@ export function rarityIndex(item, recomb, level, quality) {
   return Math.min(idx + recombGain + (perfect ? 1 : 0), RARITIES.length - 1);
 }
 
-// Reforges available to an item; item-specific ones (Gilded) only show on their items.
+// Reforges available to an item: the Blacksmith's basic ones for its type, plus the reforge stones
+// that fit its type, or that fit only certain items (Warped, Gilded, Coldfused…) when it's one of them.
+// Fishing rods, axes and equipment have no basic combat reforges here.
+const STONE_TYPES = {
+  SWORD: ['SWORD', 'SWORD/ROD'], LONGSWORD: ['SWORD', 'SWORD/ROD'], GAUNTLET: ['SWORD', 'SWORD/ROD'],
+  BOW: ['BOW'], FISHING_ROD: ['ROD', 'SWORD/ROD'], AXE: ['AXE'],
+};
 export function reforgeTable(kind, item) {
-  const table = kind === 'armor' ? ARMOR_REFORGES : kind === 'weapon' ? (isBow(item) ? BOW_REFORGES : SWORD_REFORGES) : {};
-  return Object.fromEntries(Object.entries(table).filter(([, r]) => !r.items || r.items.includes(item?.id)));
+  const cat = weaponCategory(item);
+  let basic = {};
+  let types = [];
+  if (kind === 'weapon') {
+    basic = cat === 'BOW' ? BOW_REFORGES : STONE_TYPES[cat]?.includes('SWORD') ? SWORD_REFORGES : {};
+    types = STONE_TYPES[cat] || [];
+  } else if (kind === 'armor') {
+    basic = ARMOR_REFORGES;
+    types = ['ARMOR', item?.category];
+  } else if (kind === 'equipment') types = ['EQUIPMENT', item?.category];
+  const id = (item?.id || '').replace(/^STARRED_/, '');
+  const stones = Object.entries(REFORGE_STONES)
+    .filter(([, r]) => (r.items ? r.items.includes(id) || r.items.includes(item?.id) : r.types.some((t) => types.includes(t))))
+    .map(([k, r]) => [k, { ...r, ...REFORGE_EXTRAS[k] }]);
+  return { ...basic, ...Object.fromEntries(stones) };
 }
 
 function reforgeStats(ref, rarityIdx) {
@@ -369,8 +389,10 @@ export function calculate(input) {
     ...(input.armor || []).map((p) => ({ slot: 'armor', id: p?.item?.id })),
     ...(input.equipment || []).map((p) => ({ slot: 'equipment', id: p?.item?.id })),
   ]);
+  // Speed so far (base 100 plus gear, pet, reforges…), for the Warden Helmet.
+  const speed = 100 + sources.reduce((a, src) => a + (src.stats.WALK_SPEED || 0), 0);
   const sets = evaluateSets(detected, {
-    bow, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel),
+    bow, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
     inDungeon: input.dungeonMode === 'catacombs' || input.dungeonMode === 'master',
   }, input.setInputs);
   sources.push(...sets.sources);
@@ -446,7 +468,7 @@ export function calculate(input) {
     catacombsLevel: clampCatacombs(input.catacombsLevel),
     cataBoost: catacombsBoost(input.catacombsLevel),
     baseDamage, strengthMult, initial, additiveMult, multMult, critMult, defense, defenseMult,
-    targetMaxHp: target.maxHp, lightningPct,
+    targetMaxHp: target.maxHp, lightningPct, speed,
     nonCrit, crit, expected,
   };
 }

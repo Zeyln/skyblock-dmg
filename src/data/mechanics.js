@@ -503,6 +503,8 @@ export const WEAPON_MULTIPLIERS = {
 export const weaponMultipliers = (id) => WEAPON_MULTIPLIERS[id] || WEAPON_MULTIPLIERS[id?.replace(/^STARRED_/, '')] || [];
 
 // ---------- Reforges (flat stats by rarity) ----------
+// Basic (Blacksmith) reforges are listed here per item type; reforge stones come from the NEU repo
+// (reforgeStones.js, with the item types each fits). REFORGE_EXTRAS adds what a stone does beyond flat stats.
 export const RARITIES = ['COMMON', 'UNCOMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'DIVINE'];
 
 // Rows are [Strength, Crit Chance, Crit Damage] (and optional Damage) per rarity, Common → Divine.
@@ -518,6 +520,13 @@ function reforge(name, stone, rows, extra = {}) {
   return { name, stone, stats, ...extra };
 }
 
+export const REFORGE_EXTRAS = {
+  withered: { perCataStr: 1, note: '+1 Strength per Catacombs level' },
+  ancient: { perCataCD: 1, note: '+1 Crit Damage per Catacombs level' },
+  renowned: { statPct: 1, note: '+1% all combat stats' },
+  precise: { note: '+10% damage on head hits (add under Other bonuses)' },
+};
+
 export const SWORD_REFORGES = {
   gentle: reforge('Gentle', null, [[3], [5], [7], [10], [15], [20], [25]]),
   odd: reforge('Odd', null, [[0, 12, 10], [0, 15, 15], [0, 15, 15], [0, 20, 22], [0, 25, 30], [0, 30, 40], [0, 35, 50]]),
@@ -527,18 +536,6 @@ export const SWORD_REFORGES = {
   heroic: reforge('Heroic', null, [[15], [20], [25], [32], [40], [50], [60]]),
   spicy: reforge('Spicy', null, [[2, 1, 25], [3, 1, 35], [4, 1, 45], [7, 1, 60], [10, 1, 80], [12, 1, 100], [14, 1, 120]]),
   legendary: reforge('Legendary', null, [[3, 5, 5], [7, 7, 10], [12, 9, 15], [18, 12, 22], [25, 15, 28], [32, 18, 36], [39, 21, 44]]),
-  dirty: reforge('Dirty', 'Dirt Bottle', [[2], [4], [6], [10], [12], [15], [20]]),
-  fabled: reforge('Fabled', 'Dragon Claw', [[30, 0, 15], [35, 0, 20], [40, 0, 25], [50, 0, 32], [60, 0, 40], [75, 0, 50], [90, 0, 65]]),
-  suspicious: reforge('Suspicious', 'Suspicious Vial', [[0, 1, 30, 5], [0, 2, 40, 7], [0, 3, 50, 9], [0, 5, 65, 11], [0, 7, 85, 13], [0, 10, 110, 15], [0, 13, 140, 17]]),
-  warped: reforge('Warped', 'Warped Stone', [[165, 0, 0, 165]]),
-  withered: reforge('Withered', 'Wither Blood', [[60], [75], [90], [110], [135], [170], [220]],
-    { perCataStr: 1, note: '+1 Strength per Catacombs level' }),
-  fanged: reforge('Fanged', 'Full-Jaw Fanging Kit', [[30, 3], [35, 4], [40, 5], [50, 7], [60, 8], [65, 10], [75, 12]]),
-  coldfused: reforge('Coldfused', 'Entropy Suppressor', [[15, 0, 20], [20, 0, 30], [25, 0, 40], [35, 0, 50], [45, 0, 60], [55, 0, 70], [65, 0, 90]]),
-  jerrys: reforge("Jerry's", 'Jerry Stone', [[25, 10, 50]]),
-  // Only Legendary (75) and Mythic (90) are listed; lower rarities reuse Legendary.
-  gilded: reforge('Gilded', 'Midas Jewel', [[75, 0, 0, 75], [75, 0, 0, 75], [75, 0, 0, 75], [75, 0, 0, 75], [75, 0, 0, 75], [90, 0, 0, 90]],
-    { items: ['MIDAS_SWORD', 'STARRED_MIDAS_SWORD', 'MIDAS_STAFF', 'STARRED_MIDAS_STAFF'] }),
 };
 
 // ---------- God Potion ----------
@@ -595,10 +592,6 @@ export const BOW_REFORGES = {
   unreal: reforge('Unreal', null, [[3, 8, 5], [7, 9, 10], [12, 10, 18], [18, 11, 32], [25, 13, 50], [34, 15, 70], [43, 17, 90]]),
   awkward: reforge('Awkward', null, [[0, 10, 5], [0, 12, 10], [0, 15, 15], [0, 20, 22], [0, 25, 30], [0, 30, 40], [0, 35, 50]]),
   rich: reforge('Rich', null, [[0, 10, 2], [0, 12, 4], [0, 14, 7], [0, 17, 10], [0, 20, 15], [0, 25, 20], [0, 30, 25]]),
-  precise: reforge('Precise', 'Optical Lens', [[3, 8, 5], [7, 9, 10], [12, 10, 18], [18, 11, 32], [25, 13, 50], [34, 15, 70], [45, 18, 90]],
-    { note: '+10% damage on head hits (add under Other bonuses)' }),
-  spiritual: reforge('Spiritual', 'Spirit Stone', [[4, 7, 10], [8, 8, 15], [14, 9, 23], [20, 10, 37], [28, 12, 55], [38, 14, 75], [50, 16, 100]]),
-  headstrong: reforge('Headstrong', 'Kaleidoscopic Mineral', [[2, 10, 4], [5, 11, 8], [10, 12, 16], [16, 13, 28], [23, 15, 42], [33, 17, 60], [45, 20, 80]]),
 };
 
 export const ARMOR_REFORGES = {
@@ -611,22 +604,6 @@ export const ARMOR_REFORGES = {
   smart: reforge('Smart', null, [[0]]),
   titanic: reforge('Titanic', null, [[0]]),
   wise: reforge('Wise', null, [[0]]),
-  ancient: reforge('Ancient', 'Precursor Gear', [[4, 3], [8, 5], [12, 7], [18, 9], [25, 12], [35, 15], [50, 20]],
-    { perCataCD: 1, note: '+1 Crit Damage per Catacombs level' }),
-  spiked: reforge('Spiked', 'Dragon Scale', [[3, 2, 3], [4, 4, 4], [6, 6, 6], [8, 8, 8], [10, 10, 10], [12, 12, 12], [15, 15, 15]]),
-  renowned: reforge('Renowned', 'Dragon Horn', [[3, 2, 3], [4, 4, 4], [6, 6, 6], [8, 8, 8], [10, 10, 10], [12, 12, 12], [15, 15, 15]],
-    { statPct: 1, note: '+1% all combat stats' }),
-  cubic: reforge('Cubic', 'Molten Cube', [[3], [5], [7], [10], [12], [15], [18]]),
-  hyper: reforge('Hyper', 'End Stone Geode', [[2], [4], [6], [7], [10], [12], [14]]),
-  ridiculous: reforge('Ridiculous', 'Red Nose', [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7]]),
-  undead: reforge('Undead', 'Premium Flesh', [[1], [2], [2], [3], [5], [7], [10]]),
-  submerged: reforge('Submerged', 'Deep Sea Orb', [[0, 2], [0, 4], [0, 6], [0, 8], [0, 10], [0, 12], [0, 14]]),
-  necrotic: reforge('Necrotic', 'Necromancer\'s Brooch', [[0]]),
-  giant: reforge('Giant', 'Giant Tooth', [[0]]),
-  loving: reforge('Loving', 'Red Scarf', [[0]]),
-  jaded: reforge('Jaded', 'Jaderald', [[0]]),
-  bustling: reforge('Bustling', 'Skymart Brochure', [[0]]),
-  perfect: reforge('Perfect', 'Diamond Atom', [[0]]),
 };
 
 // ---------- Gemstones ----------

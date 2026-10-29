@@ -659,3 +659,42 @@ describe('combat skill', () => {
     expect(combatWarriorBonus(60)).toBe(210);
   });
 });
+
+describe('helmet abilities and reforge pools', () => {
+  const helmet = (id) => ({ item: { id, name: id, category: 'HELMET', tier: 'LEGENDARY', stats: {} } });
+  const sword = (stats, extra = {}) => ({ id: 'TEST_SWORD', name: 'Test', category: 'SWORD', tier: 'LEGENDARY', stats, ...extra });
+
+  it('Crown of Avarice: ×(1 + 0.015 per digit of coins consumed)', () => {
+    const run = (coins) => calculate({ armor: [helmet('CROWN_OF_AVARICE')], setInputs: { crown_avarice: { coins } } }).multMult;
+    expect(run(1e9)).toBeCloseTo(1.15);
+    expect(run(1e6)).toBeCloseTo(1.105);
+    expect(calculate({ armor: [helmet('CROWN_OF_AVARICE')] }).multMult).toBeCloseTo(1.15); // default: maxed
+  });
+
+  it('Warden Helmet: Speed halved after the 400 cap, +20% per 25 left plus 1% (additive)', () => {
+    const run = (speed) => calculate({ armor: [helmet('WARDEN_HELMET')], setInputs: { warden_helmet: { speed } } }).additiveMult;
+    expect(run(400)).toBeCloseTo(1 + 1.61);
+    expect(run(500)).toBeCloseTo(1 + 1.61); // capped
+    expect(run(100)).toBeCloseTo(1 + 0.41);
+    // Blank: base 100 Speed plus gear.
+    const r = calculate({ armor: [helmet('WARDEN_HELMET')], weapon: { item: sword({ WALK_SPEED: 100 }) } });
+    expect(r.additiveMult).toBeCloseTo(1 + (20 * 100 / 25 + 1) / 100);
+  });
+
+  it('reforges only show on the item types (or items) they fit', () => {
+    const rod = { id: 'TEST_ROD', category: 'FISHING_ROD', tier: 'LEGENDARY', stats: {} };
+    const chest = { id: 'X_CHESTPLATE', category: 'CHESTPLATE', tier: 'LEGENDARY', stats: {} };
+    const boots = { id: 'X_BOOTS', category: 'BOOTS', tier: 'LEGENDARY', stats: {} };
+    const belt = { id: 'X_BELT', category: 'BELT', tier: 'LEGENDARY', stats: {} };
+    const keys = (kind, item) => Object.keys(reforgeTable(kind, item));
+    expect(keys('weapon', sword({}))).toEqual(expect.arrayContaining(['withered', 'fabled', 'dirty']));
+    expect(keys('weapon', sword({}))).not.toContain('warped'); // Aspect of the End / Void only
+    expect(keys('weapon', { id: 'ASPECT_OF_THE_END', category: 'SWORD', stats: {} })).toContain('warped');
+    expect(keys('weapon', rod)).toEqual(expect.arrayContaining(['pitchin', 'dirty']));
+    expect(keys('weapon', rod)).not.toContain('withered');
+    expect(keys('armor', chest)).toContain('loving');
+    expect(keys('armor', boots)).not.toContain('loving'); // chestplates only
+    expect(keys('equipment', belt)).toEqual(expect.arrayContaining(['strengthened', 'bloodshot']));
+    expect(keys('equipment', belt)).not.toContain('bloodsoaked'); // cloaks only
+  });
+});

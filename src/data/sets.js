@@ -8,7 +8,7 @@
 //   min: pieces needed for the bonus; full: pieces in a full set
 //   inputs: situational values the user supplies [{ key, label, type: 'number'|'toggle', min, max, def }]
 //   effect(ctx) -> { additive?, multiplier?, stats?, statPct?, pieceStatPct?, post?, text, inactive? }
-//     ctx: { count, tier, bow, inDungeon, target, weaponId, cataLevel, input(key) }
+//     ctx: { count, tier, bow, inDungeon, target, weaponId, cataLevel, speed, input(key) }
 //   noHitEffect: description for sets that are detected but don't change a single hit.
 
 const KUUDRA_TIERS = ['Basic', 'Hot', 'Burning', 'Fiery', 'Infernal'];
@@ -16,6 +16,8 @@ const kuudraTier = (id) => Math.max(0, ['', 'HOT_', 'BURNING_', 'FIERY_', 'INFER
 const kuudra = (name) => (id) => new RegExp(`^(HOT_|BURNING_|FIERY_|INFERNAL_)?${name}_(HELMET|CHESTPLATE|LEGGINGS|BOOTS)$`).test(id);
 const prefix = (...ps) => (id) => ps.some((p) => id.startsWith(p));
 const ids = (...list) => (id) => list.includes(id);
+const SPEED_CAP = 400;
+const fmtSpeed = (v) => +v.toFixed(1);
 
 // Terror: damage per Hydra Strike stack by tier, for 2 / 3 / 4 pieces.
 const TERROR_PER_STACK = [[2, 4, 6], [2.75, 5.5, 8.25], [3.5, 7, 10.5], [4.25, 8.5, 12.75], [5, 10, 15]];
@@ -152,6 +154,31 @@ export const SETS = [
       return { ...out, text: parts.join('; ') };
     },
     pieceHelmet: 'TARANTULA_HELMET',
+  },
+  // Single helmets with a damage ability (wiki, Damage Calculation source lists).
+  {
+    // ×(1 + 0.015 per digit of coins consumed), up to 1B coins (10 digits).
+    id: 'crown_avarice', name: 'Crown of Avarice', bonus: 'Overindulgence', slot: 'armor',
+    match: ids('CROWN_OF_AVARICE', 'CROWN_OF_AVARICE_CELEBRATION'), min: 1, full: 1,
+    inputs: [{ key: 'coins', label: 'Coins consumed', type: 'number', min: 0, max: 1e9, def: 1e9 }],
+    effect: ({ input }) => {
+      const coins = Math.min(1e9, Math.max(0, Math.floor(input('coins') || 0)));
+      const digits = coins ? String(coins).length : 0;
+      const mult = 1 + 0.015 * digits;
+      return { multiplier: mult, text: `×${+mult.toFixed(3)} damage (${digits} digit${digits === 1 ? '' : 's'} of coins consumed)` };
+    },
+  },
+  {
+    // Halves Speed (after the 400 cap), then +20% additive per 25 Speed left, plus 1%.
+    id: 'warden_helmet', name: 'Warden Helmet', bonus: 'Brute Force', slot: 'armor',
+    match: ids('WARDEN_HELMET'), min: 1, full: 1,
+    inputs: [{ key: 'speed', label: 'Speed before Brute Force (blank: from your gear)', type: 'number', min: 0, max: 500, placeholder: 'auto' }],
+    effect: ({ input, speed }) => {
+      const before = Math.min(SPEED_CAP, Math.max(0, input('speed') ?? speed ?? 100));
+      const halved = before / 2;
+      const pct = 20 * halved / 25 + 1;
+      return { additive: pct, text: `+${+pct.toFixed(1)}% damage (${fmtSpeed(before)} Speed, halved to ${fmtSpeed(halved)})` };
+    },
   },
   {
     id: 'mastiff', name: 'Mastiff Armor', bonus: 'Absolute Unit', slot: 'armor', match: prefix('MASTIFF_'), min: 4, full: 4,

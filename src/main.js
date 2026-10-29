@@ -398,9 +398,13 @@ const statText = (stats) => Object.entries(stats).filter(([, v]) => v)
   .map(([k, v]) => `${v > 0 ? '+' : ''}${fmt(v, 2)} ${STAT_SHORT[k] || k}`).join(', ');
 
 function reforgeOptions(table, rIdx) {
+  // Per-Catacombs-level bonuses (Withered, Ancient) are shown at the player's level.
+  const cata = clampCatacombs(state.catacombsLevel);
   return [['none', 'None'], ...Object.entries(table).map(([k, r]) => {
     const stats = Object.fromEntries(Object.entries(r.stats).map(([s, arr]) => [s, arr[Math.min(rIdx, arr.length - 1)]]));
-    const txt = statText(stats);
+    if (r.perCataStr) stats.STRENGTH = (stats.STRENGTH || 0) + r.perCataStr * cata;
+    if (r.perCataCD) stats.CRITICAL_DAMAGE = (stats.CRITICAL_DAMAGE || 0) + r.perCataCD * cata;
+    const txt = joinParts(statText(stats), r.perCataStr || r.perCataCD ? `incl. Catacombs ${cata}` : '');
     return { value: k, label: r.name, note: txt, search: r.stone || '' };
   })];
 }
@@ -422,9 +426,8 @@ function upgradeControls(kind, path) {
   const gems = getPath(`${path}.gems`) || [];
   return h('div', { style: 'margin-top:6px' },
     h('div', { class: 'upgrades' },
-      kind !== 'equipment'
-        ? selectField('Reforge', `${path}.reforge`, reforgeOptions(table, rIdx))
-        : tierCtl,
+      Object.keys(table).length ? selectField('Reforge', `${path}.reforge`, reforgeOptions(table, rIdx)) : '',
+      kind === 'equipment' ? tierCtl : '',
       !canRecomb
         ? h('span', {}, tierLabel, h('span', { class: 'muted' }, " · can't be recombobulated"))
         : topTier
@@ -713,7 +716,7 @@ function setBonusPanel(slot) {
     const weapon = byId.get(state.weapon.id);
     return evaluateSets(detected, {
       bow: isBow(weapon), target: { mobs: [], families: [], ...state.target }, weaponId: weapon?.id,
-      cataLevel: clampCatacombs(state.catacombsLevel),
+      cataLevel: clampCatacombs(state.catacombsLevel), speed: lastResult?.speed,
       inDungeon: state.dungeonMode === 'catacombs' || state.dungeonMode === 'master',
     }, state.setInputs).status;
   };
@@ -735,7 +738,7 @@ function setBonusPanel(slot) {
       return h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px' },
         h('input', { type: 'checkbox', checked: !!(getPath(path) ?? inp.def), 'data-path': path }), inp.label);
     }
-    return numField(inp.label, path, { min: inp.min, max: inp.max, step: 1, placeholder: String(inp.def ?? 0) });
+    return numField(inp.label, path, { min: inp.min, max: inp.max, step: 1, placeholder: inp.placeholder ?? String(inp.def ?? 0) });
   }));
 
   return sub(`${slot}-sets`, [title, ' ', countBadge(() => evaluate().filter((s) => s.active).length)],
@@ -1286,10 +1289,12 @@ function buildInput() {
 }
 
 let lastBow = null;
+let lastResult = null; // the latest single-hit result (the set panel reads the player's Speed from it)
 function update() {
   saveState();
   if (!items) return;
   const r = calculate(buildInput());
+  lastResult = r;
   if (lastBow !== null && lastBow !== r.bow) { lastBow = r.bow; rerenderForm(); return; }
   lastBow = r.bow;
 
