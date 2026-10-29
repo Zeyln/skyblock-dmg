@@ -233,6 +233,8 @@ export function calculate(input) {
 
   // Enchantments
   const applied = {};
+  const hitNumber = player.hitNumber || 0;
+  let lightningPct = 0;
   for (const ench of ENCHANTS) {
     const lvl = weapon.enchants?.[ench.id] || 0;
     if (!lvl || oneForAll) continue;
@@ -248,9 +250,11 @@ export function calculate(input) {
     const v = ench.values[Math.min(lvl, ench.values.length) - 1];
     const label = `${ench.name} ${roman(lvl)}`;
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
+    if (ench.sim === 'lightning') { lightningPct = v; continue; } // every 3rd hit, simulation only
     if (!hitsMob(ench.mobs, target)) continue;
-    if (ench.firstHit && !player.firstHit) continue;
-    if (ench.firstThree && !player.firstHit) continue;
+    // The simulation passes the hit's number; a single hit uses the First hit(s) setting.
+    if (ench.firstHit && !(hitNumber ? hitNumber === 1 : player.firstHit)) continue;
+    if (ench.firstThree && !(hitNumber ? hitNumber <= 3 : player.firstHit)) continue;
     let pct = v;
     if (ench.firstHit || ench.firstThree) pct *= 1 + pet.firstStrikeBoost / 100;
     if (ench.perMissingHp) pct = v * (100 - target.hpPct);
@@ -312,6 +316,7 @@ export function calculate(input) {
   const ax = input.accessoryInputs || {};
   const accWhen = {
     day: ax.time !== 'night', night: ax.time === 'night', master: input.dungeonMode === 'master', crowded: !!ax.crowded,
+    tenthHit: !!ax.tenthHit,
   };
   for (const fx of ACCESSORY_EFFECTS) {
     const tier = Math.min(Math.max(0, owned[fx.id] || 0), fx.tiers.length);
@@ -326,6 +331,7 @@ export function calculate(input) {
     if (fx.kind === 'stat') sources.push({ label: `${label} (assumed from MP)`, stats: Object.fromEntries(fx.stats.map((s) => [s, v * n])) });
     else if (fx.kind === 'statPct') statPct.STRENGTH = (statPct.STRENGTH || 0) + v;
     else if (fx.kind === 'additive') additive.push({ label: `${label} (assumed from MP)`, value: v });
+    else if (fx.kind === 'mult') multiplicative.push({ label: `${label} (assumed from MP)`, value: v });
   }
 
   // Dungeon class passive (dungeons only)
@@ -435,6 +441,7 @@ export function calculate(input) {
     catacombsLevel: clampCatacombs(input.catacombsLevel),
     cataBoost: catacombsBoost(input.catacombsLevel),
     baseDamage, strengthMult, initial, additiveMult, multMult, critMult, defense, defenseMult,
+    targetMaxHp: target.maxHp, lightningPct,
     nonCrit, crit, expected,
   };
 }

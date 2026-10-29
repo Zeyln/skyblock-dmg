@@ -26,9 +26,18 @@ export const SETS = [
   {
     id: 'crimson', name: 'Crimson Armor', bonus: 'Dominus', slot: 'armor', match: kuudra('CRIMSON'), tierOf: kuudraTier, min: 2, full: 4,
     inputs: [{ key: 'stacks', label: 'Dominus stacks', type: 'number', min: 0, max: 10, def: 10 }],
-    effect: ({ tier, input }) => (tier === 4
-      ? { additive: 10 * input('stacks'), text: `+10% damage per stack (${input('stacks')} stacks)` }
-      : { inactive: true, text: `${KUUDRA_TIERS[tier]} tier: swing range${tier >= 2 ? ' and ferocity' : ''} only — damage per stack needs Infernal` }),
+    // Per stack: Burning +1 Ferocity, Fiery +2, Infernal +2 and +10% damage (additive). The
+    // simulation builds the stacks up over the fight (sim.js).
+    effect: ({ tier, input }) => {
+      const stacks = input('stacks');
+      const fero = [0, 0, 1, 2, 2][tier] * stacks;
+      if (!fero) return { inactive: true, text: `${KUUDRA_TIERS[tier]} tier: swing range only — Ferocity per stack needs Burning` };
+      return {
+        stats: { FEROCITY: fero },
+        additive: tier === 4 ? 10 * stacks : 0,
+        text: `+${fero} Ferocity${tier === 4 ? `, +${10 * stacks}% damage` : ''} (${stacks} stacks)`,
+      };
+    },
   },
   {
     id: 'terror', name: 'Terror Armor', bonus: 'Hydra Strike', slot: 'armor', match: kuudra('TERROR'), tierOf: kuudraTier, min: 2, full: 4,

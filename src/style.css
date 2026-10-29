@@ -693,6 +693,75 @@ table.rows input { width: 100%; }
 button.danger { --face: var(--crit); background: var(--crit); --bc: var(--crit); color: var(--on-accent); }
 button.danger:hover { --face: var(--danger-hover); background: var(--danger-hover); color: var(--on-accent); --bc: var(--danger-hover); }
 button.primary:hover { color: var(--on-accent); }
+.modal-check { margin: -6px 0 18px; font-size: 13px; }
+
+/* Simulate button in the damage panel, with a pixel play triangle drawn like the chevrons. */
+.sim-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 16px; }
+.sim-btn .play {
+  width: 6px; height: 10px; background: currentColor; flex: none;
+  --play-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 5' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v5H0zM1 1h1v3H1zM2 2h1v1H2z'/%3E%3C/svg%3E");
+  -webkit-mask: var(--play-mask) center / 100% 100% no-repeat; mask: var(--play-mask) center / 100% 100% no-repeat;
+}
+@media (max-width: 1000px) { .sim-btn { margin-left: auto; } }
+
+/* Simulation screen: 80% of the viewport; its content is built in a later step. */
+.modal.sim-screen {
+  width: 80vw; height: 80vh; max-width: none; max-height: none; padding: 18px 22px;
+  display: none; flex-direction: column; gap: 14px;
+}
+.modal.sim-screen[open] { display: flex; }
+.sim-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sim-head h2 { margin: 0; }
+.sim-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.sim-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.sim-settings .field input { width: 92px; }
+.sim-settings .segmented label { white-space: nowrap; }
+.sim-settings .chips { padding-bottom: 4px; }
+.sim-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.sim-controls button { padding: 8px 14px; min-width: 76px; }
+/* Action indicator on the left, an empty stage in the middle (kept free for a graphic). */
+.sim-main { flex: 1; min-height: 160px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+.sim-procs { list-style: none; margin: 0; padding: 4px 0 0; display: flex; flex-direction: column; gap: 12px; align-self: start; }
+.sim-procs li { display: flex; align-items: center; gap: 10px; font-size: 13px; color: color-mix(in srgb, var(--faint) 55%, transparent); }
+/* Pixel LED: faint when idle; LED and label light up red for 100 ms (main.js). No transition, so it blinks. */
+.sim-procs .led { flex: none; width: 8px; height: 8px; background: currentColor; }
+.sim-procs li.on { color: var(--crit); }
+.sim-procs li { align-items: flex-start; }
+.sim-procs .led { margin-top: 4px; }
+/* Bonus names under "Other bonus proc": the row lights red, each name only when it procs. */
+.sim-bonuses { display: flex; flex-wrap: wrap; margin-top: 4px; font-size: 11px; line-height: 1.5; }
+.sim-procs li.on .sim-bonuses { color: color-mix(in srgb, var(--faint) 55%, transparent); }
+.sim-procs li > span { min-width: 0; } /* lets the bonus list wrap between names */
+.sim-bonuses span { white-space: nowrap; }
+.sim-bonuses span.on { color: var(--crit); }
+.sim-bonuses .sep { margin: 0 6px; }
+.sim-stage { min-width: 0; display: flex; align-items: center; justify-content: center; }
+.sim-status b { white-space: nowrap; }
+.stat-tiles .sim-hpbar { display: block; height: 4px; margin-top: 6px; background: var(--line); }
+.sim-hpbar i { display: block; height: 100%; background: var(--crit); }
+.sim-notes { margin: 0; }
+@media (max-width: 700px) {
+  .sim-main { grid-template-columns: minmax(0, 1fr); }
+  .sim-status { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Fake loading spinner: eight pixel squares in a ring, lit one after another (steps, not easing). */
+.sim-loader { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 18px; color: var(--muted); }
+.sim-spinner { position: relative; width: 30px; height: 30px; }
+.sim-spinner i {
+  position: absolute; width: 8px; height: 8px; background: var(--accent); opacity: .2;
+  animation: sim-spin .8s steps(1) infinite; animation-delay: calc(var(--i) * .1s - .8s);
+}
+.sim-spinner i:nth-child(1) { left: 0; top: 0; }
+.sim-spinner i:nth-child(2) { left: 11px; top: 0; }
+.sim-spinner i:nth-child(3) { left: 22px; top: 0; }
+.sim-spinner i:nth-child(4) { left: 22px; top: 11px; }
+.sim-spinner i:nth-child(5) { left: 22px; top: 22px; }
+.sim-spinner i:nth-child(6) { left: 11px; top: 22px; }
+.sim-spinner i:nth-child(7) { left: 0; top: 22px; }
+.sim-spinner i:nth-child(8) { left: 0; top: 11px; }
+@keyframes sim-spin { 0% { opacity: 1; } 12.5% { opacity: .6; } 25% { opacity: .35; } 37.5% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .sim-spinner i { animation: none; opacity: .6; } }
 
 
 /* ---------- Minecraft font: used for all text (set on :root) ---------- */

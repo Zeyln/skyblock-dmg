@@ -6,6 +6,7 @@ import './wipe-rim.js'; // feathered edge for the theme wipe (sets --wipe-rim-* 
 import { initLogo } from './logo.js';
 import { parseFormatting } from './mctext.js';
 import { detectSets, evaluateSets } from './data/sets.js';
+import { simulate } from './sim.js';
 import {
   PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
 } from './data/pets.js';
@@ -44,6 +45,8 @@ const defaultState = () => ({
   power: 'none',
   tuning: {},
   accessoryInputs: { time: 'day' },
+  // Simulation screen options.
+  sim: { mode: 'duration', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1 },
   shards: {},
   pet: { id: '', rarity: 'LEGENDARY', level: 100, item: '' },
   petExtras: { bankCoins: 0, magicFind: 0, goldDigits: 0 },
@@ -156,7 +159,8 @@ function levelOptions(max) {
 
 // ---------- confirmation modal ----------
 // Native <dialog> gives focus trapping, Esc to close and a backdrop; resolves true on confirm.
-function confirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false }) {
+// extra: optional node shown under the message (e.g. a "don't ask again" checkbox the caller reads).
+function confirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, extra = null }) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (ok) => {
@@ -170,6 +174,7 @@ function confirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 
       h('form', { onsubmit: (e) => { e.preventDefault(); finish(e.submitter?.value === 'confirm'); } },
         h('h2', { id: 'modal-title' }, title),
         h('p', {}, message),
+        extra || '',
         h('div', { class: 'modal-actions' },
           h('button', { value: 'cancel', autofocus: true }, cancelLabel),
           h('button', { value: 'confirm', class: danger ? 'danger' : 'primary' }, confirmLabel))));
@@ -1339,8 +1344,175 @@ function renderHero(r) {
     h('div', { class: 'hero-row' },
       h('div', { class: 'hero-stat' }, h('span', { class: 'hero-lbl' }, 'Non-crit'), num('nonCrit', '')),
       h('div', { class: 'hero-stat' }, h('span', { class: 'hero-lbl' }, `Average · ${fmt(r.critChance, 1)}% crit`), num('expected', 'avg'))),
+    h('button', { type: 'button', class: 'primary sim-btn', onclick: startSimulation },
+      h('span', { class: 'play', 'aria-hidden': 'true' }), 'Simulate'),
   );
   lastHero = { crit: r.crit, nonCrit: r.nonCrit, expected: r.expected };
+}
+
+// ---------- continuous damage simulation ----------
+// "Don't ask again" lasts until the page is reloaded (kept in memory only).
+let skipSimConfirm = false;
+async function startSimulation() {
+  if (!skipSimConfirm) {
+    const dontAsk = h('input', { type: 'checkbox' });
+    const ok = await confirmModal({
+      title: 'Start simulation?',
+      message: 'The simulation uses everything you have entered. Have you filled in all the details you want included?',
+      confirmLabel: 'Simulate', cancelLabel: 'Not yet',
+      extra: h('label', { class: 'check modal-check' }, dontAsk, 'Do not ask me this again'),
+    });
+    if (!ok) return;
+    skipSimConfirm = dontAsk.checked;
+  }
+  openSimScreen();
+}
+
+// A short fake load when the screen opens, for suspense.
+const SIM_LOAD_MS = 1400;
+
+function openSimScreen() {
+  const body = h('div', { class: 'sim-body' },
+    h('div', { class: 'sim-loader', role: 'status' },
+      h('div', { class: 'sim-spinner', 'aria-hidden': 'true' }, Array.from({ length: 8 }, (_, i) => h('i', { style: `--i:${i}` }))),
+      h('span', {}, 'Preparing simulation…')));
+  const dialog = h('dialog', { class: 'modal glass sim-screen', 'aria-labelledby': 'sim-title' },
+    h('div', { class: 'sim-head' },
+      h('h2', { id: 'sim-title' }, 'Simulation'),
+      h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Close')),
+    body);
+  setTimeout(() => { if (dialog.open) renderSim(body); }, SIM_LOAD_MS);
+  dialog.addEventListener('close', () => { stopSimPlayback(); dialog.remove(); });
+  // Clicking the backdrop closes it, as with the confirmation modal.
+  dialog.addEventListener('click', (e) => {
+    if (e.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close();
+  });
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+// The fight plays back in real time (or 2× / 4×). Settings on top restart it; the action
+// indicator on the left lights up for 100 ms whenever its action happens; the middle stays empty
+// for a graphic. Changing a setting re-runs with the same seed; "Restart" re-rolls.
+let simSeed = 1;
+let simTimer = 0;
+const SIM_FLASH_MS = 100;
+const stopSimPlayback = () => { clearInterval(simTimer); simTimer = 0; };
+
+function renderSim(body) {
+  stopSimPlayback();
+  const o = state.sim;
+  const restart = () => renderSim(body);
+  const set = (key, v) => { o[key] = v; saveState(); restart(); };
+  const num = (label, key, min, max) => h('label', { class: 'field' }, label,
+    h('input', { type: 'number', min, max, step: 1, value: o[key],
+      onchange: (e) => set(key, Math.min(max, Math.max(min, Number(e.target.value) || min))) }));
+  const segmented = (name, options, value, onPick) => h('div', { class: 'segmented' }, options.map(([v, label]) =>
+    h('label', {}, h('input', { type: 'radio', name, checked: value === v, onchange: () => onPick(v) }), label)));
+
+  const s = simulate(buildInput(), { ...o, seed: simSeed });
+  const events = s.error ? [] : s.events;
+  let paused = false;
+  const playBtn = h('button', { type: 'button', class: 'primary', onclick: () => {
+    paused = !paused;
+    playBtn.textContent = paused ? 'Play' : 'Pause';
+  } }, 'Pause');
+
+  const settings = h('div', { class: 'sim-settings' },
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Fight'),
+      segmented('sim-mode', [['duration', 'Fixed duration'], ['kill', 'Until enemy dies']], o.mode, (v) => set('mode', v))),
+    o.mode === 'duration' ? num('Duration (s)', 'duration', 1, 600) : '',
+    num('Enemy HP %', 'enemyHpPct', 1, 100),
+    num('Your HP %', 'playerHpPct', 1, 100),
+    h('div', { class: 'chips' }, h('label', { title: 'Health and incoming damage are not simulated yet' },
+      h('input', { type: 'checkbox', checked: o.godMode, onchange: (e) => { o.godMode = e.target.checked; saveState(); } }), 'God mode')),
+    h('div', { class: 'sim-controls' },
+      segmented('sim-speed', [[1, '1×'], [2, '2×'], [4, '4×']], o.speed, (v) => { o.speed = v; saveState(); }),
+      playBtn,
+      h('button', { type: 'button', onclick: () => { simSeed++; restart(); } }, 'Restart')));
+
+  // Action indicator, like a switch's status lights: an LED and its label flash together.
+  const flash = (el) => {
+    el.classList.add('on');
+    clearTimeout(el.flashTimer);
+    el.flashTimer = setTimeout(() => el.classList.remove('on'), SIM_FLASH_MS);
+  };
+  // names: the bonuses this row can show ("A | B | C"); each lights with the row when it procs.
+  const proc = (label, names = []) => {
+    const tags = new Map(names.map((n) => [n, h('span', {}, n)]));
+    const list = names.length ? h('span', { class: 'sim-bonuses' },
+      [...tags.values()].flatMap((t, i) => (i ? [h('span', { class: 'sep', 'aria-hidden': 'true' }, '|'), t] : [t]))) : '';
+    const row = h('li', {}, h('i', { class: 'led', 'aria-hidden': 'true' }), h('span', {}, label, list));
+    return {
+      row,
+      fire(fired = []) {
+        flash(row);
+        for (const n of fired) if (tags.has(n)) flash(tags.get(n));
+      },
+    };
+  };
+  const bonusNames = [...new Set(events.flatMap((e) => e.bonuses))];
+  const procs = {
+    hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
+  };
+
+  const readout = (k) => { const v = h('b', {}, '—'); return { v, el: h('div', {}, v, h('span', {}, k)) }; };
+  const time = readout(s.mode === 'kill' ? 'Time' : `Time (of ${fmt(s.seconds)} s)`);
+  const dmg = readout('Damage');
+  const dps = readout('Damage / s');
+  const hpRead = readout('Enemy HP');
+  const hpBar = h('i', { style: 'width:100%' });
+  if (s.maxHp) hpRead.el.append(h('span', { class: 'sim-hpbar' }, hpBar)); // a span: tile divs get tile styling
+
+  body.replaceChildren(settings,
+    h('div', { class: 'sim-main' },
+      h('ul', { class: 'sim-procs', 'aria-label': 'Actions' }, Object.values(procs).map((p) => p.row)),
+      h('div', { class: 'sim-stage' }, s.error ? h('p', { class: 'hint' }, s.error) : '')),
+    h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, hpRead.el),
+    s.notes?.length ? h('p', { class: 'hint sim-notes' }, s.notes.join(' ')) : '');
+  if (s.error) return;
+
+  // Playback: advance the fight clock by real time × speed and replay every event it passes.
+  let i = 0;
+  let clock = 0;
+  let total = 0;
+  let last = null;
+  const show = () => {
+    const end = i >= events.length;
+    const t = end ? s.seconds : clock;
+    time.v.textContent = `${fmt(t, 1)} s`;
+    dmg.v.textContent = fmt(total);
+    dps.v.textContent = end ? fmt(s.dps) : clock >= 1 ? fmt(total / clock) : '—';
+    if (s.maxHp) {
+      const hp = i ? events[i - 1].hp : s.startHp;
+      hpRead.v.textContent = fmt(hp);
+      hpBar.style.width = `${hp / s.maxHp * 100}%`;
+    } else hpRead.v.textContent = '—';
+  };
+  // A ~60 fps timer reading the real clock (keeps going in a background tab, unlike animation frames).
+  const frame = () => {
+    const now = performance.now();
+    if (last !== null && !paused) clock += (now - last) / 1000 * o.speed;
+    last = now;
+    while (i < events.length && events[i].t <= clock) {
+      const e = events[i++];
+      total = e.total;
+      procs.hit.fire();
+      if (e.ferocity) procs.ferocity.fire();
+      if (e.swipe) procs.swipe.fire();
+      if (e.bonuses.length) procs.bonus.fire(e.bonuses);
+    }
+    show();
+    if (i >= events.length) {
+      stopSimPlayback();
+      playBtn.disabled = true;
+      playBtn.textContent = s.killedAt !== null ? 'Killed' : 'Done';
+    }
+  };
+  show();
+  simTimer = setInterval(frame, 16);
 }
 
 // Keep layout offsets in sync with the header and the corner damage panel (their heights vary

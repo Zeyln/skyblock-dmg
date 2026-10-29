@@ -392,6 +392,9 @@ export const ENCHANTS = [
   { id: 'titan_killer', name: 'Titan Killer', on: MELEE, titanKiller: true,
     values: [2, 4, 6, 8, 12, 16, 20], caps: [6, 12, 18, 24, 40, 60, 80] },
   { id: 'critical', name: 'Critical', on: MELEE, stat: 'CRITICAL_DAMAGE', values: [10, 20, 30, 40, 50, 70, 100] },
+  // Lightning every 3rd hit for % of that hit's damage: no single-hit effect, used by the simulation (sim.js).
+  { id: 'thunderlord', name: 'Thunderlord', on: MELEE, sim: 'lightning', values: [8, 16, 24, 32, 40, 50, 60] },
+  { id: 'thunderbolt', name: 'Thunderbolt', on: MELEE, sim: 'lightning', values: [4, 8, 12, 16, 20, 25, 30] },
 ];
 
 // Pairs that can't be on the same weapon (applying one replaces the other in-game).
@@ -399,6 +402,7 @@ export const ENCHANT_CONFLICTS = [
   ['execute', 'prosecute'],
   ['first_strike', 'triple_strike'],
   ['giant_killer', 'titan_killer'],
+  ['thunderlord', 'thunderbolt'],
 ];
 export function enchantConflict(id, enchants) {
   for (const [a, b] of ENCHANT_CONFLICTS) {
@@ -736,12 +740,11 @@ export const tuningPoints = (mp) => Math.floor(Math.max(0, mp || 0) / 10);
 // from the accessories' descriptions (NEU repo); additive vs multiplicative from the wiki's Damage
 // Calculation source lists. Only the highest tier held in a family counts.
 //   tiers: [name, value, mp], lowest first
-//   kind:  'stat' (flat stats), 'statPct' (% Strength), 'additive'
-//   when:  condition from the accessory inputs ('day', 'night', 'master', 'crowded')
+//   kind:  'stat' (flat stats), 'statPct' (% Strength), 'additive', 'mult'
+//   when:  condition from the accessory inputs ('day', 'night', 'master', 'crowded'; 'tenthHit' is set by the simulation)
 //   per:   accessory input the value is multiplied by (perMax caps it)
 // Left out as they don't apply in a real fight: Bat Person (bats summoned), Gravity Talisman (near the
-// island's spawn), Ring of Love (1-in-100 chance at best), Vampire Dentist Relic (healing only). Tarantula
-// (every 10th hit) is left for a damage-over-time simulation.
+// island's spawn), Ring of Love (1-in-100 chance at best), Vampire Dentist Relic (healing only).
 export const ACCESSORY_EFFECTS = [
   { id: 'shark_tooth', tiers: [['Sharp Shark Tooth Necklace', 8, 36]], kind: 'stat', stats: ['STRENGTH'] },
   { id: 'red_claw', tiers: [['Red Claw Talisman', 1, 142], ['Red Claw Ring', 3, 481], ['Red Claw Artifact', 5, 643]],
@@ -757,6 +760,8 @@ export const ACCESSORY_EFFECTS = [
   { id: 'blood_god', tiers: [['Blood God Crest', 1, 584]], kind: 'stat', stats: ['STRENGTH'], per: 'killDigits', perMax: 7 },
   { id: 'draconic', tiers: [['Draconic Talisman', 2, 639], ['Draconic Ring', 3, 919]], kind: 'additive', families: ['Dragon'] },
   { id: 'reaper_orb', tiers: [['Reaper Orb', 2, 1155]], kind: 'stat', stats: ['STRENGTH'], per: 'recentKills' },
+  // Every 10th melee hit on the same enemy (multiplicative per the wiki): only the simulation counts hits.
+  { id: 'tarantula', tiers: [['Tarantula Talisman', 1.1, 12]], kind: 'mult', when: 'tenthHit', on: [...MELEE, ...AXE] },
 ];
 
 // The tier (1-based) of each accessory family held at this magical power; families not yet reached are left out.
@@ -905,3 +910,28 @@ export const PROGRESSION_ITEMS = {
     tierAt(n) { return this.rarity.find(([m]) => n >= m)[1]; },
   },
 };
+
+// ---------- Continuous damage (sim.js) ----------
+// Values from the wiki's Bonus Attack Speed, Ferocity, Dragon Claw (Fabled) and Crimson Armor pages (Oct 2026).
+export const TICKS_PER_SECOND = 20;
+export const ATTACK_SPEED_CAP = 100;
+export const FEROCITY_CAP = 500;
+// Melee: the enemy's invulnerability ticks after a hit, round(10 / (1 + AS/100)).
+export const meleeHitTicks = (as) => Math.round(10 / (1 + Math.min(ATTACK_SPEED_CAP, Math.max(0, as)) / 100));
+// Shortbows: shot cooldown, rounded up. Other bows are assumed fully drawn (1 s) each shot.
+export const shortbowTicks = (as) => Math.ceil(10 / (1 + Math.min(ATTACK_SPEED_CAP, Math.max(0, as)) / 100));
+export const BOW_DRAW_TICKS = 20;
+// Bows whose description says 'Shortbow: Instantly shoots!' (NEU repo).
+export const SHORTBOWS = ['ARTISANAL_SHORTBOW', 'DRAGON_SHORTBOW', 'ITEM_SPIRIT_BOW', 'STARRED_ITEM_SPIRIT_BOW', 'JUJU_SHORTBOW',
+  'MACHINE_GUN_BOW', 'MOSQUITO_BOW', 'SCORPION_BOW', 'TERMINATOR'];
+// Fabled: crits deal 0–15% more damage (uniform, multiplicative).
+export const FABLED_MAX_BONUS = 0.15;
+// Crimson Armor (Dominus): melee hits gain a stack this often (s) for 2 / 3 / 4 pieces, max 10 stacks.
+export const DOMINUS_GAIN_S = { 2: 1.5, 3: 1, 4: 0.5 };
+export const DOMINUS_MAX = 10;
+// Swipe at 10 stacks (wiki, Damage Calculation › Additive Sources):
+//   swipe = hit damage × Swipe Strength / the hit's Additive Multiplier, doubled on the first swipe per enemy,
+// so the more additive damage a hit has, the smaller the swipe is next to it. Swipe Strength by tier
+// (Basic..Infernal) and pieces worn (2 / 3 / 4) is below. The wiki gives the timing only as "upon
+// reaching 10 stacks": the simulation swipes on each stack gain while at 10.
+export const DOMINUS_SWIPE_MULT = [[0.5, 1, 1.5], [0.625, 1.25, 1.875], [0.75, 1.5, 2.25], [0.875, 1.75, 2.625], [1, 2, 3]];

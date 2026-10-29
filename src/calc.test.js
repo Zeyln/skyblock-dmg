@@ -233,7 +233,7 @@ describe('accessories assumed from magical power', () => {
 
   it('picks the tiers reached at this MP', () => {
     expect(assumedAccessories(0)).toEqual({});
-    expect(assumedAccessories(60)).toEqual({ shark_tooth: 1, day_crystal: 1 });
+    expect(assumedAccessories(60)).toEqual({ tarantula: 1, shark_tooth: 1, day_crystal: 1 });
     expect(assumedAccessories(700)).toMatchObject({ red_claw: 3, day_crystal: 2, runeblade: 3, master_skull: 2 });
   });
 
