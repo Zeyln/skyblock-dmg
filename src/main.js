@@ -531,6 +531,31 @@ function slotBlock(kind, path, list, title, dlId, openUpgrades = false) {
       [upgradeControls(kind, path), anvilControls(kind, path)], openUpgrades) : '');
 }
 
+// Armor / equipment slot folded into one row: closed it reads "Helmet  Item · ★5 · reforge · gems…";
+// open it shows the picker, stars and every upgrade control. Opening one closes the other open
+// slot in the same section, so only one is being edited at a time.
+function compactSlot(kind, path, list, title) {
+  const p = itemPicker(list, path);
+  const item = byId.get(getPath(`${path}.id`));
+  const summary = () => {
+    const it = byId.get(getPath(`${path}.id`));
+    if (!it) return 'empty';
+    const stars = getPath(`${path}.stars`);
+    return joinParts(it.name, stars ? `★${stars}` : '', upgradeSummary(kind, path));
+  };
+  const d = sub(`${path}-slot`, title, summary, [
+    h('div', { class: 'slot-head compact' }, p.input, starsField(path)),
+    p.dl, p.info,
+    item ? h('div', { class: 'slot-upgrades' }, upgradeControls(kind, path), anvilControls(kind, path)) : '',
+  ]);
+  d.classList.add('slot-acc');
+  d.addEventListener('toggle', () => {
+    if (!d.open) return;
+    for (const other of d.parentElement?.querySelectorAll(':scope > details.slot-acc[open]') || []) if (other !== d) other.open = false;
+  });
+  return d;
+}
+
 // Fill every combat-relevant gem slot on all gear with the given quality.
 function fillAllGems(quality) {
   const paths = ['weapon', ...ARMOR_SLOTS.map((s) => `armor.${s}`), ...EQUIP_SLOTS.map((s) => `equipment.${s.key}`)];
@@ -641,7 +666,7 @@ function armorSection() {
     h('div', { class: 'presets' }, allReforge, fillGems, allRecomb),
     setBonusPanel('armor'),
     ARMOR_SLOTS.map((slot) =>
-      slotBlock('armor', `armor.${slot}`, items.armor[slot], slot[0] + slot.slice(1).toLowerCase(), `dl-${slot}`)),
+      compactSlot('armor', `armor.${slot}`, items.armor[slot], slot[0] + slot.slice(1).toLowerCase())),
   ]);
 }
 
@@ -703,7 +728,7 @@ function equipmentSection() {
     setBonusPanel('equipment'),
     EQUIP_SLOTS.map((slot) => {
       const list = slot.cats.flatMap((c) => items.equipment[c] || []).sort((a, b) => a.name.localeCompare(b.name));
-      return slotBlock('equipment', `equipment.${slot.key}`, list, slot.name, `dl-${slot.key}`);
+      return compactSlot('equipment', `equipment.${slot.key}`, list, slot.name);
     })]);
 }
 
@@ -925,7 +950,11 @@ function bonusSection() {
   ]);
 }
 
+// Set while the user is editing a preset enemy's stats (the "Edit" link); a new enemy resets it.
+let editingEnemy = false;
+
 function chooseEnemy(name) {
+  editingEnemy = false;
   const e = ENEMIES.find((x) => x.name === name);
   state.target.enemy = e ? name : '';
   if (e) {
@@ -1062,7 +1091,7 @@ function targetSection() {
     { searchable: true, submenus: true, placeholder: 'Search enemy, area or mob type…', ariaLabel: 'Enemy' });
   const chosen = ENEMIES.find((e) => e.name === state.target.enemy);
   const onFloor = floorStats(chosen, state.dungeonFloor); // regular dungeon mobs: stats on the chosen floor
-  const desc = chosen ? joinParts(chosen.mobs.join(', '), chosen.boss ? 'boss' : '',
+  const desc = chosen ? joinParts([...chosen.mobs, ...chosen.families].join(', '), chosen.boss ? 'boss' : '',
     onFloor ? `${fmt(onFloor.hp)} HP on ${floorName(state.dungeonFloor)}`
       : chosen.maxHp ? `${fmt(chosen.maxHp)} HP` : chosen.hpRange ? `${chosen.hpRange} HP` : '',
     (onFloor ? onFloor.defense : chosen.defense) ? `${fmt(onFloor ? onFloor.defense : chosen.defense)} defense` : '') : '';
@@ -1074,17 +1103,20 @@ function targetSection() {
       cls && state.dungeonMode !== 'none' ? `${cls.name} ${state.dungeonClass.level ?? 0}` : '');
   };
   const typeCount = () => (state.target.mobs || []).length + (state.target.families || []).length;
+  const presetView = !!chosen && !editingEnemy;
   return panel('target', 'Target & fight', summary, [
     h('div', { class: 'grid wide' }, h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Enemy'), enemySelect)),
-    desc ? h('p', { class: 'item-stats', style: 'margin:6px 0 14px' }, desc) : '',
+    // A preset enemy's stats are filled in: show them as this line, with the fields behind "Edit".
+    desc ? h('p', { class: 'item-stats enemy-line', style: 'margin:6px 0 14px' }, desc,
+      presetView ? h('button', { type: 'button', class: 'link', onclick: () => { editingEnemy = true; rerenderForm(); } }, 'Edit') : '') : '',
     dungeonControls(),
     h('div', { class: 'grid' },
       numField('Target HP %', 'target.hpPct', { min: 0, max: 100 }),
-      numField('Target max HP', 'target.maxHp', { min: 0 }),
-      numField('Target defense', 'target.defense', { min: 0 }),
+      presetView ? '' : numField('Target max HP', 'target.maxHp', { min: 0 }),
+      presetView ? '' : numField('Target defense', 'target.defense', { min: 0 }),
       numField('Your max HP', 'player.maxHp', { min: 0 }),
-      h('div', { style: 'align-self:end;padding-bottom:8px' }, checkField('Boss / miniboss', 'target.boss'))),
-    sub('target-types', ['Enemy types ', countBadge(typeCount)],
+      presetView ? '' : h('div', { style: 'align-self:end;padding-bottom:8px' }, checkField('Boss / miniboss', 'target.boss'))),
+    presetView ? '' : sub('target-types', ['Enemy types ', countBadge(typeCount)],
       () => [...(state.target.mobs || []), ...(state.target.families || [])].join(', ') || 'none', [
         targetChips('mobs', MOB_TYPES),
         h('h3', {}, 'Creature'),

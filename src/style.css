@@ -488,6 +488,11 @@ button.link:hover { color: var(--crit); }
 .slot-head { display: grid; grid-template-columns: 120px minmax(0, 1fr) 160px; gap: 10px; align-items: end; }
 .slot-head .combo { width: 100%; }
 .slot-head .name { font-weight: 600; padding-bottom: 8px; }
+/* Compact armor/equipment slot (compactSlot): the row itself names the slot, so the open slot's
+   head is just the item picker and stars. */
+.slot-head.compact { grid-template-columns: minmax(0, 1fr) 160px; }
+.slot-upgrades { margin-top: 10px; }
+.enemy-line .link { margin-left: 8px; }
 .item-stats { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .upgrades { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: end; }
 .upgrades .combo { width: 100%; }
