@@ -1462,7 +1462,10 @@ function renderSim(body) {
     hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
   };
   // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
-  const PHASE_LABELS = { shield: 'Hitshield', laser: 'Broken Heart Radiation', glyph: 'Yang Glyph', heads: 'Nukekubi Fixations' };
+  const PHASE_LABELS = {
+    shield: 'Hitshield', laser: 'Broken Heart Radiation', glyph: 'Yang Glyph', heads: 'Nukekubi Fixations',
+    leap: 'Backstab', web: 'Web of Lies', brood: 'Conjoined Brood',
+  };
   const phases = s.phases || [];
   const phaseRows = Object.entries(PHASE_LABELS).filter(([k]) => phases.some((p) => p.kind === k))
     .map(([k, label]) => ({ k, row: h('li', {}, h('i', { class: 'led', 'aria-hidden': 'true' }), label) }));
@@ -1499,9 +1502,11 @@ function renderSim(body) {
     dmg.v.textContent = fmt(total);
     dps.v.textContent = end ? fmt(s.dps) : clock >= 1 ? fmt(total / clock) : '—';
     if (s.maxHp) {
-      const hp = i ? events[i - 1].hp : s.startHp;
+      // Each event carries the current boss's max HP (it changes when the Conjoined Brood takes over).
+      const e = i ? events[i - 1] : null;
+      const hp = e ? e.hp : s.startHp;
       hpRead.v.textContent = fmt(hp);
-      hpBar.style.width = `${hp / s.maxHp * 100}%`;
+      hpBar.style.width = `${hp / (e?.maxHp || s.maxHp) * 100}%`;
     } else hpRead.v.textContent = '—';
   };
   // A ~60 fps timer reading the real clock (keeps going in a background tab, unlike animation frames).
@@ -1523,7 +1528,7 @@ function renderSim(body) {
       for (const { row } of phaseRows) row.classList.remove('on');
       stopSimPlayback();
       playBtn.disabled = true;
-      playBtn.textContent = s.killedAt !== null ? 'Killed' : 'Done';
+      playBtn.textContent = s.killedAt !== null ? 'Killed' : s.despawned ? 'Despawned' : 'Done';
     }
   };
   show();

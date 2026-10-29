@@ -1,7 +1,8 @@
 import { calculate } from './calc.js';
 import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
-  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_SHIELD_S, bossPhases,
+  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_SHIELD_S,
+  LEAP_AIM_S, WEB_SWAP_S, bossPhases,
 } from './data/mechanics.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
@@ -39,7 +40,8 @@ export function simulate(input, opts = {}) {
   const player = { ...input.player, fullHealth: playerHpPct >= 100, lowHealth: playerHpPct < 20 };
 
   const base = calculate({ ...input, player: { ...player, hitNumber: 1 } });
-  const maxHp = base.targetMaxHp || 0;
+  let maxHp = base.targetMaxHp || 0; // changes when a second boss takes over (Conjoined Brood)
+  let broodOn = false;
   let hpPct = Math.min(100, Math.max(0, opts.enemyHpPct ?? 100));
   let hp = maxHp * hpPct / 100;
   if (mode === 'kill' && !maxHp) {
@@ -61,13 +63,13 @@ export function simulate(input, opts = {}) {
     const tenth = n % 10 === 0;
     const fourth = n % 4 === 0;
     const pct = maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
-    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}`;
+    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${broodOn}`;
     let r = cache.get(key);
     if (!r) {
       r = calculate({
         ...input,
         player: { ...player, hitNumber: n },
-        target: { ...input.target, hpPct: pct },
+        target: { ...input.target, hpPct: pct, ...(broodOn ? { maxHp: input.target.maxHp * boss.brood.hpMult } : {}) },
         accessoryInputs: { ...input.accessoryInputs, tenthHit: tenth },
         setInputs: { ...input.setInputs, crimson: { ...input.setInputs?.crimson, stacks }, tarantula: { ...input.setInputs?.tarantula, fourth } },
       });
@@ -97,14 +99,15 @@ export function simulate(input, opts = {}) {
   const phases = [];
   const startFrac = hp / maxHp;
   const triggers = boss ? [
-    ...boss.shield.at.filter((f) => f < 1).map((f) => ({ f, kind: 'shield' })),
+    ...(boss.shield?.at || []).filter((f) => f < 1).map((f) => ({ f, kind: 'shield' })),
     ...(boss.lasers?.at || []).map((f) => ({ f, kind: 'laser' })),
+    ...(boss.webs?.at || []).map((f) => ({ f, kind: 'web' })),
     ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
     ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
   ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
   // Hitshields: hit down with the weapon, or (T4, or above TERMINATOR_MP) shot down with a Terminator
   // in a fixed time, during which there are no melee hits and the player does nothing else.
-  const terminator = boss && (boss.tier === 4 || (input.magicalPower || 0) > TERMINATOR_MP);
+  const terminator = !!boss?.shield && (boss.tier === 4 || (input.magicalPower || 0) > TERMINATOR_MP);
   let shield = null;
   let shieldUntil = 0;
   const raiseShield = (t) => {
@@ -127,9 +130,15 @@ export function simulate(input, opts = {}) {
   };
   let nextHead = null;
   let heads = []; // spawn times of heads still alive
-  if (boss && startFrac >= 1) raiseShield(0);
+  if (boss?.shield && startFrac >= 1) raiseShield(0);
+  // Backstab leaps: the player re-aims for a moment after each.
+  let nextLeap = boss?.leaps ? boss.leaps.every : null;
+  // Web of Lies: swap to a shortbow and shoot the egg sacs (Piercing hits them all), no melee meanwhile.
+  const sacShot = shortbowTicks(base.totals.ATTACK_SPEED || 0) / TICKS_PER_SECOND;
+  const despawnTick = boss?.despawnS ? boss.despawnS * TICKS_PER_SECOND : Infinity;
   const trigger = (kind, t) => {
     if (kind === 'shield') raiseShield(t);
+    else if (kind === 'web') pause('web', t, WEB_SWAP_S + boss.webs.hits * sacShot);
     else if (kind === 'laser') {
       const { vulnerable, immune } = boss.lasers;
       phases.push({ kind: 'laser', start: t, end: t + vulnerable + immune });
@@ -138,8 +147,12 @@ export function simulate(input, opts = {}) {
     else if (kind === 'heads') nextHead = t;
   };
 
-  for (let tick = 0, n = 1; tick < endTick; n++) {
+  for (let tick = 0, n = 1; tick < Math.min(endTick, despawnTick); n++) {
     const t = tick / TICKS_PER_SECOND;
+    while (nextLeap !== null && t >= nextLeap) {
+      pause('leap', nextLeap, LEAP_AIM_S);
+      nextLeap += boss.leaps.every;
+    }
     // A glyph lands: the player stops to break it (never while the shield is up; it waits for the shield).
     // (A glyph due while a Terminator-broken shield is up waits for it, plus the hold.)
     if (nextGlyph !== null && nextGlyph < shieldUntil && t >= nextGlyph) nextGlyph = shieldUntil + boss.glyphs.hold;
@@ -157,9 +170,10 @@ export function simulate(input, opts = {}) {
       }
       nextHead += boss.heads.every;
     }
-    const wait = blocked.find(([s, e]) => t >= s && t < e);
+    // (The tolerance keeps float sums like 57.85 + 0.2 from leaving a window open forever.)
+    const wait = blocked.find(([s, e]) => t >= s && t < e - 1e-9);
     if (wait) {
-      tick = Math.ceil(wait[1] * TICKS_PER_SECOND);
+      tick = Math.max(tick + 1, Math.ceil(wait[1] * TICKS_PER_SECOND - 1e-9));
       n--;
       continue;
     }
@@ -181,7 +195,7 @@ export function simulate(input, opts = {}) {
     }
     // Ferocity: each full 100 is an extra strike, the rest a chance at one more; strikes repeat the hit.
     let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
-    if (boss && !shield) fero /= boss.feroDivisor;
+    if (boss?.feroDivisor && !shield) fero /= boss.feroDivisor;
     const strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
 
     out.hits++;
@@ -216,26 +230,41 @@ export function simulate(input, opts = {}) {
       hp = Math.max(0, hp - dealt);
       hpPct = hp / maxHp * 100;
     }
-    events.push({ t, hit: dmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp });
+    events.push({ t, hit: dmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp });
+    if (maxHp && hp <= 0 && boss?.brood && !broodOn) {
+      // Till Death Do Us Part: the Conjoined Brood takes over with more health and only its passives.
+      broodOn = true;
+      maxHp *= boss.brood.hpMult;
+      hp = maxHp;
+      hpPct = 100;
+      triggers.length = 0;
+      phases.push({ kind: 'brood', start: t, end: Infinity });
+      tick += ticksPerHit;
+      continue;
+    }
     if (maxHp && hp <= 0) { killedAt = t; break; }
     while (triggers.length && hp <= triggers[0].f * maxHp) trigger(triggers.shift().kind, t);
     tick += ticksPerHit;
   }
 
-  const seconds = killedAt ?? (mode === 'kill' ? SIM_MAX_SECONDS : duration);
+  const limit = mode === 'kill' ? SIM_MAX_SECONDS : duration;
+  const despawned = killedAt === null && boss?.despawnS < limit;
+  const seconds = killedAt ?? (despawned ? boss.despawnS : limit);
   if (shield) phases.push({ kind: 'shield', start: shield.start, end: seconds });
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
-  if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
+  if (despawned) notes.push(`The boss despawned after ${boss.despawnS / 60} minutes: the Slayer quest failed.`);
+  else if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (terminator) notes.push(`Hitshields are broken with a Terminator (explosive arrows) in ${TERMINATOR_SHIELD_S.join('–')} s.`);
-  if (boss) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
-  else if (input.target?.boss) notes.push('Boss damage caps are not modelled.');
+  if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
+  if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.webs ? `; Web of Lies costs ${WEB_SWAP_S} s to swap and re-engage plus ${boss.webs.hits} shortbow shots at the egg sacs` : ''}${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
+  if (!boss && input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {
-    mode, seconds, killedAt, maxHp, startHp: maxHp * Math.min(100, Math.max(0, opts.enemyHpPct ?? 100)) / 100,
+    mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp: maxHp * Math.min(100, Math.max(0, opts.enemyHpPct ?? 100)) / 100,
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
     hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes,
   };

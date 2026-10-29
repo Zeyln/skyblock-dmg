@@ -964,17 +964,42 @@ export const TERMINATOR_MP = 900;
 export const TERMINATOR_SHIELD_S = [2.5, 3];
 export const HEAD_LOOK_S = 0.5;
 export const HEAD_BATCH = 2;
-const SERAPH_TIERS = ['I', 'II', 'III', 'IV'];
+const TIERS = ['I', 'II', 'III', 'IV', 'V'];
+// Tarantula Broodfather, from its wiki page and the 0.23.2 patch notes (Oct 2026):
+//   Backstab: the boss leaps behind the player; the player loses LEAP_AIM_S re-aiming. The wiki says
+//     only "occasionally": one leap every 5 s is assumed.
+//   Web of Lies (T3+): at 66% and 33% the boss leaps away behind webs with egg sacs above it (2 × 3 /
+//     3 × 6 / 4 × 9 hits for T3–T5). The player takes WEB_SWAP_S to swap to a shortbow and re-engage, then
+//     shoots the sacs; Piercing hits every sac, so it takes one sac's hits in shots, no melee meanwhile.
+//   Till Death Do Us Part (T5): killing it summons the Conjoined Brood with twice its health, which
+//     only uses the passives (Backstab). T5's natural regeneration has no published rate: left out.
+//   Bat Barrage only stops magic damage. Slayer bosses despawn after despawnS (3 min here, 4 for Voidgloom).
+export const LEAP_AIM_S = 0.2;
+export const WEB_SWAP_S = 1;
 export function bossPhases(enemyName) {
-  const m = /^Voidgloom Seraph (I|II|III|IV)$/.exec(enemyName || '');
-  if (!m) return null;
-  const t = SERAPH_TIERS.indexOf(m[1]);
-  return {
-    tier: t + 1,
-    feroDivisor: 4,
-    shield: { hits: [15, 30, 60, 100][t], at: [1, 2 / 3, 1 / 3] },
-    lasers: t === 3 ? { at: [5 / 6, 1 / 2, 1 / 6], vulnerable: 2, immune: 6 } : null,
-    glyphs: t >= 1 ? { from: t === 1 ? 1 / 2 : 2 / 3, every: 8, hold: 2 } : null,
-    heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
-  };
+  const seraph = /^Voidgloom Seraph (I|II|III|IV)$/.exec(enemyName || '');
+  if (seraph) {
+    const t = TIERS.indexOf(seraph[1]);
+    return {
+      tier: t + 1,
+      despawnS: 240,
+      feroDivisor: 4,
+      shield: { hits: [15, 30, 60, 100][t], at: [1, 2 / 3, 1 / 3] },
+      lasers: t === 3 ? { at: [5 / 6, 1 / 2, 1 / 6], vulnerable: 2, immune: 6 } : null,
+      glyphs: t >= 1 ? { from: t === 1 ? 1 / 2 : 2 / 3, every: 8, hold: 2 } : null,
+      heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
+    };
+  }
+  const brood = /^Tarantula Broodfather (I|II|III|IV|V)$/.exec(enemyName || '');
+  if (brood || enemyName === 'Conjoined Brood') {
+    const t = brood ? TIERS.indexOf(brood[1]) : 4;
+    return {
+      tier: t + 1,
+      despawnS: 180,
+      leaps: { every: 5 },
+      webs: brood && t >= 2 ? { at: [2 / 3, 1 / 3], hits: [3, 6, 9][t - 2] } : null,
+      brood: brood && t === 4 ? { hpMult: 2 } : null,
+    };
+  }
+  return null;
 }

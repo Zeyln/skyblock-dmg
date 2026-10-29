@@ -203,3 +203,57 @@ describe('Voidgloom Seraph phases', () => {
     expect(s.events[0].ferocity).toBe(4);
   });
 });
+
+describe('Tarantula Broodfather phases', () => {
+  const brood = (tier, maxHp) => ({ enemy: `Tarantula Broodfather ${tier}`, maxHp, mobs: ['Arthropod'], boss: true });
+  const hitIn = (s, a, b) => s.events.some((e) => e.t >= a && e.t < b);
+
+  it('Backstab: a leap every 5 s costs 200 ms re-aiming', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { target: brood('I', 1e9) }), { duration: 12 });
+    const leaps = s.phases.filter((p) => p.kind === 'leap');
+    expect(leaps.map((p) => p.start)).toEqual([5, 10]);
+    for (const p of leaps) {
+      expect(p.end - p.start).toBeCloseTo(0.2);
+      expect(hitIn(s, p.start, p.end)).toBe(false);
+    }
+  });
+
+  it('Web of Lies at 66% and 33%: swap, then one sac’s hits in shortbow shots', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 100e3 - 5 }) }, { target: brood('IV', 2.5e6) }), { mode: 'kill' });
+    const webs = s.phases.filter((p) => p.kind === 'web');
+    expect(webs).toHaveLength(2);
+    // T4: 6 hits a sac; 0 attack speed shoots every 0.5 s: 1 s + 3 s.
+    for (const p of webs) {
+      expect(p.end - p.start).toBeCloseTo(4);
+      expect(hitIn(s, p.start + 1e-9, p.end)).toBe(false); // after the hit that set it off
+    }
+  });
+
+  it('T5: the Conjoined Brood takes over with twice the health', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 1e6 - 5 }) }, { target: brood('V', 10e6) }), { mode: 'kill' });
+    const takeover = s.phases.find((p) => p.kind === 'brood');
+    expect(takeover).toBeTruthy();
+    expect(s.events.at(-1).maxHp).toBe(20e6);
+    expect(s.total).toBe(30e6);
+    expect(s.killedAt).toBeGreaterThan(takeover.start);
+  });
+
+  it('always finishes, whatever the attack speed (pauses ending between ticks)', () => {
+    // Used to hang: a leap pushed past a web ended at 57.85 + 0.2 s, just past a tick.
+    const stuck = simulate(noCrit({ item: sword({ DAMAGE: 1e5, ATTACK_SPEED: 12 }) }, { target: brood('IV', 2.5e6) }), { mode: 'kill' });
+    expect(stuck.seconds).toBeGreaterThan(0);
+    for (let as = 0; as <= 100; as += 7) {
+      for (const seed of [1, 2, 3]) {
+        const s = simulate(noCrit({ item: sword({ DAMAGE: 2e5, ATTACK_SPEED: as, FEROCITY: 150 }) }, { target: brood('V', 10e6) }), { mode: 'kill', seed });
+        expect(s.seconds).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('despawns after 3 minutes', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { target: brood('IV', 2.5e6) }), { mode: 'kill' });
+    expect(s.despawned).toBe(true);
+    expect(s.seconds).toBe(180);
+    expect(s.events.at(-1).t).toBeLessThan(180);
+  });
+});
