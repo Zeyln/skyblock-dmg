@@ -975,11 +975,14 @@ function bonusSection() {
     h('div', { class: 'grid' },
       numField('Combat level', 'combatLevel', { min: 0, max: 60, step: 1 }),
       numField(`Catacombs level (0–${CATACOMBS_MAX_LEVEL})`, 'catacombsLevel', { min: 0, max: CATACOMBS_MAX_LEVEL, step: 1, rerender: true }),
+      // Book of Progression's Extra Infliction scales with it (from level 75); blank: no book.
+      numField('SkyBlock level (Book of Progression)', 'skyblockLevel', { min: 0, step: 1 }),
       // Only special mayors that change a hit are listed.
       selectField('Mayor', 'mayor', [{ value: '', label: 'Other / none', cls: 'muted' },
         ...Object.entries(MAYORS).map(([id, name]) => ({ value: id, label: name, note: MAYOR_EFFECTS[id] }))], { rerender: true }),
       h('div', { class: 'chips', style: 'align-self:end;padding-bottom:6px' },
-        chipField('God Potion', 'godPotion', { rerender: true, title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' }))),
+        chipField('God Potion', 'godPotion', { rerender: true, title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' }),
+        isBow(byId.get(state.weapon.id)) ? chipField('Twilight Arrow Poison', 'twilightPoison', { title: '×1.1 damage from arrows' }) : '')),
     sub('buffs-custom', ['Custom bonuses ', countBadge(() => usedRows().length)],
       'Pets effects, potions, accessories, abilities…', [
         h('div', { class: 'table-scroll' }, h('table', { class: 'rows' },
@@ -1286,6 +1289,8 @@ function buildInput() {
     catacombsLevel: state.catacombsLevel,
     dungeonMode: state.dungeonMode,
     godPotion: state.godPotion,
+    skyblockLevel: state.skyblockLevel,
+    twilightPoison: state.twilightPoison,
     mayor: state.mayor,
     dungeonClass: state.dungeonClass,
     setInputs: state.setInputs,

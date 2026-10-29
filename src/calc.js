@@ -4,6 +4,7 @@ import {
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
   ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, WEAPON_ABILITIES, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
+  LUST_FOR_BLOOD_PER_LEVEL, lustForBloodCap, EXTRA_INFLICTION, TWILIGHT_POISON_MULT,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
 } from './data/mechanics.js';
@@ -369,7 +370,20 @@ export function calculate(input) {
     if (pct) {
       multiplicative.push({ label: `${name} ${lvl}${dClass.solo ? ' (no dupes ×2)' : ''}: ${bow ? 'arrow' : 'melee'} damage`, value: 1 + pct / 100 });
     } else notes.push(`${name} has no ${bow ? 'bow' : 'melee'} damage passive.`);
+    // Berserk Lust for Blood: each earlier melee hit on this enemy adds 3% per level (additive), capped.
+    if (dClass.id === 'berserk' && !bow && hitNumber > 1) {
+      const stack = Math.min(lustForBloodCap(lvl), (hitNumber - 1) * LUST_FOR_BLOOD_PER_LEVEL * lvl);
+      if (stack) additive.push({ label: `Lust for Blood (${hitNumber - 1} hits)`, value: stack });
+    }
   }
+
+  // Book of Progression's Extra Infliction (×, from SkyBlock level 75) and Twilight Arrow Poison (bows).
+  const sbl = Math.max(0, Math.floor(input.skyblockLevel || 0));
+  if (sbl >= EXTRA_INFLICTION.from) {
+    const pct = Math.min(EXTRA_INFLICTION.max, sbl * EXTRA_INFLICTION.perLevel);
+    multiplicative.push({ label: `Book of Progression: Extra Infliction (SkyBlock ${sbl})`, value: 1 + pct / 100 });
+  }
+  if (bow && input.twilightPoison) multiplicative.push({ label: 'Twilight Arrow Poison', value: TWILIGHT_POISON_MULT });
 
   // God Potion
   if (input.godPotion) {

@@ -846,6 +846,15 @@ export function starMultiplier(item, stars, dungeonMode) {
 // Healer, Mage and Tank have no passive that changes a melee or bow hit.
 // Classes page: class strength is doubled when only one player picks that class.
 export const CLASS_MAX_LEVEL = 50;
+// Berserk's Lust for Blood (wiki, Berserk): +3% per Berserk level per hit on the same enemy, additive.
+// The wiki gives its cap as "+100% per 5 levels" but also "1,100% in total at 50"; +10% per 5 levels
+// plus +1,000% at level 50 is the reading that adds up.
+export const LUST_FOR_BLOOD_PER_LEVEL = 3;
+export const lustForBloodCap = (level) => 10 * Math.floor(level / 5) + (level >= 50 ? 1000 : 0);
+// Book of Progression's Extra Infliction: +0.01% per SkyBlock level from 75, up to 5% (multiplicative).
+export const EXTRA_INFLICTION = { from: 75, perLevel: 0.01, max: 5 };
+export const TWILIGHT_POISON_MULT = 1.1;
+
 export const DUNGEON_CLASSES = [
   { id: 'healer', name: 'Healer' },
   { id: 'mage', name: 'Mage' },

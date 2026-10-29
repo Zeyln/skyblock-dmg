@@ -775,3 +775,28 @@ describe('equipment damage bonuses', () => {
     expect(calculate({ equipment }).multMult).toBe(1);
   });
 });
+
+describe('accessory and class sources', () => {
+  const sword = { item: { id: 'TEST_SWORD', name: 'Test', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95 } } };
+  const bowW = { item: { id: 'TEST_BOW', name: 'Bow', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 95 } } };
+
+  it('Book of Progression: +0.01% per SkyBlock level from 75, max 5%', () => {
+    expect(calculate({ weapon: sword, skyblockLevel: 370 }).multMult).toBeCloseTo(1.037);
+    expect(calculate({ weapon: sword, skyblockLevel: 600 }).multMult).toBeCloseTo(1.05);
+    expect(calculate({ weapon: sword, skyblockLevel: 60 }).multMult).toBe(1);
+  });
+
+  it('Twilight Arrow Poison: ×1.1 on bows only', () => {
+    expect(calculate({ weapon: bowW, twilightPoison: true }).multMult).toBeCloseTo(1.1);
+    expect(calculate({ weapon: sword, twilightPoison: true }).multMult).toBe(1);
+  });
+
+  it('Berserk Lust for Blood: +3% per level for each earlier hit, capped', () => {
+    const run = (hitNumber, level = 50) => calculate({ weapon: sword, dungeonMode: 'catacombs', dungeonClass: { id: 'berserk', level },
+      player: { hitNumber } }).additiveMult;
+    expect(run(1)).toBe(1);
+    expect(run(2)).toBeCloseTo(1 + 1.5); // 3% × 50 per hit
+    expect(run(20)).toBeCloseTo(1 + 11); // capped at 1,100% at level 50
+    expect(run(20, 20)).toBeCloseTo(1 + 0.4); // level 20 cap: 10% × 4
+  });
+});
