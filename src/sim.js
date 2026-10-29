@@ -111,6 +111,7 @@ export function simulate(input, opts = {}) {
     ...(boss.webs?.at || []).map((f) => ({ f, kind: 'web' })),
     ...(boss.split?.at || []).map((f) => ({ f, kind: 'split' })),
     ...(boss.pillars ? [{ f: boss.pillars.from, kind: 'pillars' }] : []),
+    ...(boss.pups ? [{ f: boss.pups.at, kind: 'pups' }] : []),
     ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
     ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
   ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
@@ -179,9 +180,26 @@ export function simulate(input, opts = {}) {
     };
     showSplit(t, 'Quazii');
   };
+  // Sven Packmaster: pups arrive one by one while the boss is protected; it fights again once all
+  // are dead. One phase segment per number killed, so the indicator can count them.
+  let pups = null; // [{ at, hp, maxHp }]
+  let pupPhase = null;
+  const showPups = (t, detail) => {
+    if (pupPhase) pupPhase.end = t;
+    pupPhase = detail ? { kind: 'pups', start: t, end: Infinity, detail } : null;
+    if (pupPhase) phases.push(pupPhase);
+  };
+  const callPups = (t, f) => {
+    hp = Math.max(hp, f * maxHp);
+    hpPct = hp / maxHp * 100;
+    const { count, every, hpFrac } = boss.pups;
+    pups = Array.from({ length: count }, (_, i) => ({ at: t + i * every, hp: maxHp * hpFrac, maxHp: maxHp * hpFrac }));
+    showPups(t, `0 of ${count} pups killed`);
+  };
   const trigger = (kind, t, f) => {
     if (kind === 'shield') raiseShield(t);
     else if (kind === 'split') split(t, f);
+    else if (kind === 'pups') callPups(t, f);
     else if (kind === 'pillars') nextPillar = t + boss.pillars.hold;
     else if (kind === 'web') pause('web', t, WEB_SWAP_S + boss.webs.hits * sacShot);
     else if (kind === 'laser') {
@@ -243,7 +261,19 @@ export function simulate(input, opts = {}) {
       const att = need ? need[0] + need.slice(1).toLowerCase() : '';
       showHellion(t, `${att} · ${matched ? weapons[w].item.name : 'no matching dagger'}${demon ? ` · ${demon.name}` : ''}`);
     }
-    side = demon ? { maxHp: demon.maxHp / derpy, pct: demon.hp / demon.maxHp * 100 } : null;
+    // Sven's pups: hit the first one that has arrived; if none has yet, wait for the next.
+    let pup = null;
+    if (pups) {
+      pup = pups.find((p) => p.hp > 0 && p.at <= t + 1e-9) || null;
+      if (!pup) {
+        const next = pups.find((p) => p.hp > 0);
+        tick = Math.max(tick + 1, Math.ceil(next.at * TICKS_PER_SECOND - 1e-9));
+        n--;
+        continue;
+      }
+    }
+    const add = demon || pup;
+    side = add ? { maxHp: add.maxHp / derpy, pct: add.hp / add.maxHp * 100 } : null;
 
     // (The tolerance keeps float sums like 57.85 + 0.2 from leaving a window open forever.)
     const wait = blocked.find(([s, e]) => t >= s && t < e - 1e-9);
@@ -334,6 +364,19 @@ export function simulate(input, opts = {}) {
       tick += step;
       continue;
     }
+    if (pup) {
+      pup.hp = Math.max(0, pup.hp - dealt);
+      if (pup.hp <= 0) {
+        const killed = pups.filter((p) => p.hp <= 0).length;
+        if (killed === pups.length) {
+          pups = null;
+          showPups(t, null);
+        } else showPups(t, `${killed} of ${pups.length} pups killed`);
+      }
+      events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup' });
+      tick += step;
+      continue;
+    }
     if (maxHp) {
       hp = Math.max(0, hp - dealt);
       hpPct = hp / maxHp * 100;
@@ -355,7 +398,7 @@ export function simulate(input, opts = {}) {
       continue;
     }
     if (maxHp && hp <= 0) { killedAt = t; break; }
-    while (!demons && triggers.length && hp <= triggers[0].f * maxHp) {
+    while (!demons && !pups && triggers.length && hp <= triggers[0].f * maxHp) {
       const { kind, f } = triggers.shift();
       trigger(kind, t, f);
     }

@@ -312,3 +312,27 @@ describe('Inferno Demonlord phases', () => {
     expect(s.killedAt).not.toBeNull();
   });
 });
+
+describe('Sven Packmaster phases', () => {
+  const sven = (tier, maxHp) => ({ enemy: `Sven Packmaster ${tier}`, maxHp, mobs: ['Animal'], families: ['Wolf'], boss: true });
+
+  it('T4: at 50% the boss is protected until all 5 pups (10% HP each) are dead', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 100e3 - 5 }) }, { target: sven('IV', 2e6) }), { mode: 'kill' });
+    const pupHits = s.events.filter((e) => e.target === 'Sven Pup');
+    // 200k pups, 100k hits: two hits each; they arrive a second apart, so it takes about 4 s plus a hit.
+    expect(pupHits).toHaveLength(10);
+    expect(pupHits[0].maxHp).toBe(200e3);
+    const phase = s.phases.filter((p) => p.kind === 'pups');
+    expect(phase[0].detail).toBe('0 of 5 pups killed');
+    expect(phase.at(-1).end - phase[0].start).toBeGreaterThanOrEqual(4);
+    // The boss's HP waits at 1M meanwhile, then it dies.
+    const bossAfter = s.events.filter((e) => !e.target && e.t > pupHits.at(-1).t);
+    expect(bossAfter[0].hp).toBe(1e6 - 100e3);
+    expect(s.killedAt).toBeGreaterThan(pupHits.at(-1).t);
+  });
+
+  it('T1–T2 call no pups', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 1e3 - 5 }) }, { target: sven('II', 40e3) }), { mode: 'kill' });
+    expect(s.phases).toEqual([]);
+  });
+});

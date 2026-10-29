@@ -1488,6 +1488,7 @@ function renderSim(body) {
     shield: 'Hitshield', laser: 'Broken Heart Radiation', glyph: 'Yang Glyph', heads: 'Nukekubi Fixations',
     leap: 'Backstab', web: 'Web of Lies', brood: 'Conjoined Brood',
     hellion: 'Hellion Shield', split: 'Demonsplit', pillar: 'Fire Pillar', swap: 'Dagger swap',
+    pups: 'Call the pups!',
   };
   const phases = s.phases || [];
   const phaseRows = Object.entries(PHASE_LABELS).filter(([k]) => phases.some((p) => p.kind === k))

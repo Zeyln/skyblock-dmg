@@ -1006,6 +1006,10 @@ export function daggerPartner(id) {
   return other.ids[DAGGER_FAMILIES[fam].ids.indexOf(id)];
 }
 
+// Sven Packmaster (T3–T4), from its wiki page: at 50% it is protected while it spawns a pup every
+// second for 5 s, each with 10% of its max health, and stays protected until all of them are dead. The
+// player kills each pup as it arrives. No despawn time is published for it, so none is applied.
+
 export const LEAP_AIM_S = 0.2;
 export const WEB_SWAP_S = 1;
 export function bossPhases(enemyName) {
@@ -1022,6 +1026,8 @@ export function bossPhases(enemyName) {
       heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
     };
   }
+  const sven = /^Sven Packmaster (III|IV)$/.exec(enemyName || '');
+  if (sven) return { tier: TIERS.indexOf(sven[1]) + 1, pups: { at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 } };
   const demonlord = /^Inferno Demonlord (I|II|III|IV)$/.exec(enemyName || '');
   if (demonlord) {
     const t = TIERS.indexOf(demonlord[1]);
