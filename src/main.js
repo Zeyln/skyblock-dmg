@@ -17,7 +17,7 @@ import {
   ARMOR_REFORGES, RARITIES, GEMS, GEM_QUALITIES, SLOT_ACCEPTS, GEM_FILL_PRIORITY, gemValue,
   DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
-  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers,
+  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers, assumedAccessories,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
   DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
@@ -43,6 +43,7 @@ const defaultState = () => ({
   magicalPower: 0,
   power: 'none',
   tuning: {},
+  accessoryInputs: { time: 'day' },
   shards: {},
   pet: { id: '', rarity: 'LEGENDARY', level: 100, item: '' },
   petExtras: { bankCoins: 0, magicFind: 0, goldDigits: 0 },
@@ -748,15 +749,27 @@ function accessorySection() {
     return joinParts(`${fmt(mp)} MP`, power && power.id !== 'none' ? power.name : 'no power',
       used ? `${used}/${tuningPoints(mp)} tuning` : '');
   };
+  // Conditions of the accessories assumed at this MP, shown only once one of them is reached.
+  const held = assumedAccessories(state.magicalPower);
+  const has = (...ids) => ids.some((id) => held[id]);
+  const accInputs = [
+    has('day_crystal', 'night_crystal') ? selectField('Time of day', 'accessoryInputs.time', [['day', 'Day'], ['night', 'Night']]) : '',
+    has('blood_god') ? numField('Blood God kill digits', 'accessoryInputs.killDigits', { min: 0, max: 7, step: 1 }) : '',
+    has('reaper_orb') ? numField('Kills in the last 5s', 'accessoryInputs.recentKills', { min: 0, step: 1 }) : '',
+  ].filter(Boolean);
+  const accChips = has('bluetooth') ? [chipField('6+ players on the island', 'accessoryInputs.crowded')] : [];
   return panel('accessories', 'Accessories & Power', summary, [
     h('div', { class: 'grid wide' },
-      numField('Magical Power', 'magicalPower', { min: 0, step: 1 }),
+      numField('Magical Power', 'magicalPower', { min: 0, step: 1, rerender: true }),
       selectField('Power', 'power', powerOpts),
       h('div', { class: 'field muted', id: 'power-mult', style: 'align-self:end;padding-bottom:8px' })),
     h('h3', {}, 'Tuning — ', tuningInfo),
     h('div', { class: 'grid' },
       Object.entries(TUNING_PER_POINT).map(([stat, per]) =>
         numField(`${STAT_LABELS[stat]} (+${per}/pt)`, `tuning.${stat}`, { min: 0, step: 1 }))),
+    accInputs.length || accChips.length ? h('h3', {}, 'Accessory conditions') : '',
+    accInputs.length ? h('div', { class: 'grid' }, accInputs) : '',
+    accChips.length ? h('div', { class: 'chips', style: accInputs.length ? 'margin-top:12px' : null }, accChips) : '',
   ]);
 }
 
@@ -1224,6 +1237,7 @@ function buildInput() {
     magicalPower: state.magicalPower,
     power: state.power,
     tuning: state.tuning,
+    accessoryInputs: state.accessoryInputs,
     shards: state.shards,
     pet: resolvedPet(),
     petExtras: state.petExtras,

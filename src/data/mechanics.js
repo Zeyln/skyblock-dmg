@@ -184,7 +184,7 @@ export const ENEMIES = [
 
   ...[['Young', 7500000, 18], ['Old', 15000000, 18], ['Wise', 9000000, 25], ['Unstable', 9000000, 25],
     ['Strong', 9000000, 25], ['Protector', 9000000, 85], ['Superior', 12000000, 30]].map(([n, hp, def]) =>
-    enemy('The End', `${n} Dragon`, ['Ender', 'Arcane', 'Airborne'], hp, { boss: true, defense: def })),
+    enemy('The End', `${n} Dragon`, ['Ender', 'Arcane', 'Airborne'], hp, { boss: true, defense: def, families: ['Dragon'] })),
   // The End island. Endermen, Zealots, Voidlings and Seers are endermen (katana/End Sword bonus);
   // Endermites, the Obsidian Defender and the End Stone Protector are not.
   enemy('The End', 'Enderman (Lv45)', ['Ender'], 4500, { families: ['Enderman'] }),
@@ -438,7 +438,7 @@ export function ultimatesFor(item) {
 // From the wiki's Damage Calculation tables. Rules match a mob type (mobs) or a creature
 // family (families) that isn't an official mob type: the katanas only hit Endermen harder,
 // not every Ender mob (e.g. dragons).
-export const TARGET_FAMILIES = ['Enderman', 'Wolf', 'Sea creature'];
+export const TARGET_FAMILIES = ['Enderman', 'Wolf', 'Sea creature', 'Dragon'];
 
 const vs = (mobs, mult) => ({ mobs, mult });
 const vsFamily = (families, mult) => ({ families, mult });
@@ -729,6 +729,46 @@ export const tuningPoints = (mp) => Math.floor(Math.max(0, mp || 0) / 10);
 
 // ---------- Attribute shards (Hunting) ----------
 // perLevel at levels 1-10. kind: 'additive' (% damage) | 'stat' (flat) | 'statPct' (% of a stat)
+// ---------- Accessories (assumed from magical power) ----------
+// Players are assumed to collect accessories in order of fewest coins per magical power. The MP at which
+// that order (skyplus AccessoryPlanner: buy prices, upgrades, recombobulators, Jacobus slots; prices of
+// Oct 2026) first holds each tier is its third value; tiers it never reaches are left out. Effects come
+// from the accessories' descriptions (NEU repo); additive vs multiplicative from the wiki's Damage
+// Calculation source lists. Only the highest tier held in a family counts.
+//   tiers: [name, value, mp], lowest first
+//   kind:  'stat' (flat stats), 'statPct' (% Strength), 'additive'
+//   when:  condition from the accessory inputs ('day', 'night', 'master', 'crowded')
+//   per:   accessory input the value is multiplied by (perMax caps it)
+// Left out as they don't apply in a real fight: Bat Person (bats summoned), Gravity Talisman (near the
+// island's spawn), Ring of Love (1-in-100 chance at best), Vampire Dentist Relic (healing only). Tarantula
+// (every 10th hit) is left for a damage-over-time simulation.
+export const ACCESSORY_EFFECTS = [
+  { id: 'shark_tooth', tiers: [['Sharp Shark Tooth Necklace', 8, 36]], kind: 'stat', stats: ['STRENGTH'] },
+  { id: 'red_claw', tiers: [['Red Claw Talisman', 1, 142], ['Red Claw Ring', 3, 481], ['Red Claw Artifact', 5, 643]],
+    kind: 'stat', stats: ['CRITICAL_DAMAGE'] },
+  { id: 'burststopper', tiers: [['Burststopper Talisman', 1, 1239]], kind: 'stat', stats: ['STRENGTH'] },
+  { id: 'day_crystal', tiers: [['Day Crystal', 5, 56], ['Sunshine Crystal', 10, 545]], kind: 'stat', stats: ['STRENGTH', 'DEFENSE'], when: 'day' },
+  { id: 'night_crystal', tiers: [['Night Crystal', 5, 72], ['Moonlight Crystal', 10, 541]], kind: 'stat', stats: ['STRENGTH', 'DEFENSE'], when: 'night' },
+  { id: 'runeblade', tiers: [['Runeblade Talisman', 5, 279], ['Runeblade Ring', 10, 421], ['Runeblade Artifact', 15, 656]],
+    kind: 'additive', mobs: ['Woodland'], on: AXE },
+  { id: 'master_skull', tiers: [['Master Skull - Tier 1', 1, 416], ['Master Skull - Tier 3', 3, 492], ['Master Skull - Tier 6', 8, 1440]],
+    kind: 'statPct', when: 'master' },
+  { id: 'bluetooth', tiers: [['Bluetooth Ring', 1, 553]], kind: 'stat', stats: ['DAMAGE'], when: 'crowded' },
+  { id: 'blood_god', tiers: [['Blood God Crest', 1, 584]], kind: 'stat', stats: ['STRENGTH'], per: 'killDigits', perMax: 7 },
+  { id: 'draconic', tiers: [['Draconic Talisman', 2, 639], ['Draconic Ring', 3, 919]], kind: 'additive', families: ['Dragon'] },
+  { id: 'reaper_orb', tiers: [['Reaper Orb', 2, 1155]], kind: 'stat', stats: ['STRENGTH'], per: 'recentKills' },
+];
+
+// The tier (1-based) of each accessory family held at this magical power; families not yet reached are left out.
+export function assumedAccessories(mp) {
+  const out = {};
+  for (const fx of ACCESSORY_EFFECTS) {
+    const tier = fx.tiers.filter(([, , at]) => (mp || 0) >= at).length;
+    if (tier) out[fx.id] = tier;
+  }
+  return out;
+}
+
 export const SHARDS = [
   // Ruler attributes: +3% damage vs mob type per level (boosted by Echo of Ruler)
   ...[

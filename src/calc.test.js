@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { calculate, itemStats, rarityIndex, reforgeTable } from './calc.js';
 import {
   powerMultiplier, combatWarriorBonus, POWERS, greedBonus, enchantConflict, floorLabel, catacombsBoost,
-  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats, ENCHANTS, ultimatesFor,
+  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats, ENCHANTS, ultimatesFor, assumedAccessories,
 } from './data/mechanics.js';
 import { petNumbers, cleanLore } from './data/pets.js';
 import { parseFormatting, stripFormatting, hasFormatting, MC_COLORS } from './mctext.js';
@@ -135,14 +135,15 @@ describe('accessories', () => {
 
   it('bloody power at 250 MP gives listed stats', () => {
     const r = calculate({ magicalPower: 250, power: 'bloody' });
-    expect(r.strength).toBeCloseTo(104.13, 1);
-    expect(r.critDamage).toBeCloseTo(50 + 104.13, 1);
+    // + assumed accessories at 250 MP: Shark Tooth 8 and Day Crystal 5 Strength, Red Claw Talisman 1 Crit Damage
+    expect(r.strength).toBeCloseTo(104.13 + 13, 1);
+    expect(r.critDamage).toBeCloseTo(50 + 104.13 + 1, 1);
     expect(POWERS.find((p) => p.id === 'bloody').unique.ATTACK_SPEED).toBe(10);
   });
 
   it('tuning adds stats and warns when over budget', () => {
     const r = calculate({ magicalPower: 100, tuning: { STRENGTH: 15 } });
-    expect(r.strength).toBe(15);
+    expect(r.strength).toBe(15 + 13); // + Shark Tooth and Day Crystal assumed at 100 MP
     expect(r.notes.join()).toMatch(/only grants 10/);
   });
 });
@@ -223,6 +224,52 @@ describe('enchants per weapon type', () => {
   it('Woodsplitter is for axes only', () => {
     const ws = ENCHANTS.find((e) => e.id === 'woodsplitter');
     expect(ws.on).toEqual(['AXE']);
+  });
+});
+
+describe('accessories assumed from magical power', () => {
+  const run = (magicalPower, accessoryInputs = {}, extra = {}) =>
+    calculate({ weapon: { item: sword({ DAMAGE: 95 }) }, magicalPower, accessoryInputs, ...extra });
+
+  it('picks the tiers reached at this MP', () => {
+    expect(assumedAccessories(0)).toEqual({});
+    expect(assumedAccessories(60)).toEqual({ shark_tooth: 1, day_crystal: 1 });
+    expect(assumedAccessories(700)).toMatchObject({ red_claw: 3, day_crystal: 2, runeblade: 3, master_skull: 2 });
+  });
+
+  it('adds flat stats and the crystal for the time of day', () => {
+    expect(run(100).strength).toBe(8 + 5);
+    expect(run(100, { time: 'night' }).strength).toBe(8 + 5);
+    expect(run(60, { time: 'night' }).strength).toBe(8); // no Night Crystal yet
+    expect(run(700).critDamage).toBe(50 + 5);
+  });
+
+  it('conditional effects need their condition', () => {
+    expect(run(600).damage).toBe(95);
+    expect(run(600, { crowded: true }).damage).toBe(96); // Bluetooth Ring
+    expect(run(600, { killDigits: 9 }).strength).toBe(8 + 10 + 7); // Blood God Crest, max 7 digits
+    expect(run(1200, { recentKills: 4 }).strength).toBe(8 + 10 + 8); // Reaper Orb
+  });
+
+  it('Master Skull is a % Strength boost in Master Mode only', () => {
+    const str = { item: sword({ DAMAGE: 95, STRENGTH: 100 }) };
+    const strength = (dungeonMode) => calculate({ weapon: str, magicalPower: 500, dungeonMode }).strength;
+    expect(strength('none')).toBe(113); // + Shark Tooth 8 and Day Crystal 5
+    expect(strength('master')).toBeCloseTo(113 * 1.03); // Master Skull - Tier 3
+  });
+
+  it('Draconic vs dragons and Runeblade (axes vs Woodland) are additive', () => {
+    const dragon = { mobs: ['Ender'], families: ['Dragon'] };
+    expect(run(1000, {}, { target: dragon }).additiveMult).toBeCloseTo(1.03);
+    expect(run(1000).additiveMult).toBe(1);
+    const axe = { item: { id: 'TEST_AXE', name: 'Axe', category: 'AXE', tier: 'RARE', stats: { DAMAGE: 95 } } };
+    const woodland = { mobs: ['Woodland'] };
+    expect(calculate({ weapon: axe, magicalPower: 700, target: woodland }).additiveMult).toBeCloseTo(1.15);
+    expect(run(700, {}, { target: woodland }).additiveMult).toBe(1); // a sword
+  });
+
+  it('End dragons are tagged as dragons', () => {
+    expect(ENEMIES.find((e) => e.name === 'Superior Dragon').families).toContain('Dragon');
   });
 });
 

@@ -2,7 +2,7 @@ import {
   BASE_PLAYER_STATS, ENCHANTS, weaponMultipliers, SWORD_REFORGES, BOW_REFORGES, ARMOR_REFORGES,
   RARITIES, GEMS, gemValue, PROGRESSION_ITEMS, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
-  ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
+  ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
@@ -305,6 +305,27 @@ export function calculate(input) {
     if (s.afterHit && !player.recentlyHit) continue;
     if (s.ruler) v *= rulerMult;
     additive.push({ label, value: v });
+  }
+
+  // Accessories assumed from magical power (data/mechanics.js ACCESSORY_EFFECTS)
+  const owned = assumedAccessories(mp);
+  const ax = input.accessoryInputs || {};
+  const accWhen = {
+    day: ax.time !== 'night', night: ax.time === 'night', master: input.dungeonMode === 'master', crowded: !!ax.crowded,
+  };
+  for (const fx of ACCESSORY_EFFECTS) {
+    const tier = Math.min(Math.max(0, owned[fx.id] || 0), fx.tiers.length);
+    if (!tier) continue;
+    if (fx.when && !accWhen[fx.when]) continue;
+    if (fx.on && !fx.on.includes(weaponCategory(weapon.item))) continue;
+    if (!hitsMob(fx.mobs, target)) continue;
+    if (fx.families && !fx.families.some((f) => target.families.includes(f))) continue;
+    const [label, v] = fx.tiers[tier - 1];
+    const n = fx.per ? Math.min(fx.perMax ?? Infinity, Math.max(0, ax[fx.per] || 0)) : 1;
+    if (!n) continue;
+    if (fx.kind === 'stat') sources.push({ label: `${label} (assumed from MP)`, stats: Object.fromEntries(fx.stats.map((s) => [s, v * n])) });
+    else if (fx.kind === 'statPct') statPct.STRENGTH = (statPct.STRENGTH || 0) + v;
+    else if (fx.kind === 'additive') additive.push({ label: `${label} (assumed from MP)`, value: v });
   }
 
   // Dungeon class passive (dungeons only)
