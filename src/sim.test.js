@@ -406,3 +406,11 @@ describe('Mage Outlaw phases', () => {
     expect(run(500e3 - 5).phaseKinds).toEqual(['crystal', 'skulls', 'reflect']);
   });
 });
+
+describe('Primordial Armor in the simulation', () => {
+  it('every 3rd hit gets +50%', () => {
+    const armor = ['HELMET', 'CHESTPLATE', 'LEGGINGS', 'BOOTS'].map((s) => ({ item: { id: `PRIMORDIAL_${s}`, name: s, category: s, tier: 'LEGENDARY', stats: {} } }));
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { armor }), { duration: 3 });
+    expect(s.events.map((e) => e.hit)).toEqual([100, 100, 150, 100, 100, 150]);
+  });
+});

@@ -67,8 +67,9 @@ export function simulate(input, opts = {}) {
   const hitResult = (n, stacks, w = 0) => {
     const tenth = n % 10 === 0;
     const fourth = n % 4 === 0;
+    const third = n % 3 === 0; // Primordial Armor
     const pct = side ? Math.round(side.pct * 10) / 10 : maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
-    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${broodOn}|${w}|${side?.maxHp}`;
+    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}`;
     let r = cache.get(key);
     if (!r) {
       const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * boss.brood.hpMult } : {};
@@ -78,14 +79,15 @@ export function simulate(input, opts = {}) {
         player: { ...player, hitNumber: n },
         target: { ...input.target, hpPct: pct, ...targetMax },
         accessoryInputs: { ...input.accessoryInputs, tenthHit: tenth },
-        setInputs: { ...input.setInputs, crimson: { ...input.setInputs?.crimson, stacks }, tarantula: { ...input.setInputs?.tarantula, fourth } },
+        setInputs: { ...input.setInputs, crimson: { ...input.setInputs?.crimson, stacks }, tarantula: { ...input.setInputs?.tarantula, fourth },
+          primordial: { ...input.setInputs?.primordial, third } },
       });
       // Bonuses that only some hits get, for the action indicator.
       const labels = [...r.additive, ...r.multiplicative].map((b) => b.label);
       r.procs = [
         n <= 3 && labels.find((l) => /^(First Strike|Triple-Strike)/.test(l)),
         tenth && labels.find((l) => l.startsWith('Tarantula Talisman')) && 'Tarantula Talisman',
-        fourth && labels.find((l) => l.includes('Octodexterity')) && 'Octodexterity',
+        (fourth || third) && labels.find((l) => l.includes('Octodexterity')) && 'Octodexterity',
       ].filter(Boolean).map((l) => l.replace(/ [IVX]+$/, ''));
       cache.set(key, r);
     }

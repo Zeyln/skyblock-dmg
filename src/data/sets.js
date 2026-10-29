@@ -155,6 +155,30 @@ export const SETS = [
     },
     pieceHelmet: 'TARANTULA_HELMET',
   },
+  {
+    // Every 3rd strike +50% (additive); the simulation counts strikes, a single hit uses the toggle.
+    id: 'primordial', name: 'Primordial Armor', bonus: 'Octodexterity', slot: 'armor', match: prefix('PRIMORDIAL_'), min: 4, full: 4,
+    inputs: [{ key: 'third', label: 'This is the 3rd strike', type: 'toggle', def: false }],
+    effect: ({ input }) => (input('third')
+      ? { additive: 50, text: 'every 3rd strike +50% damage' }
+      : { inactive: true, text: 'every 3rd strike +50% damage (not this hit)' }),
+  },
+  {
+    // Trolling The Reaper: +100% (additive) vs Undead, but only 1% damage to everything else.
+    id: 'reaper', name: 'Reaper Armor', bonus: 'Trolling The Reaper', slot: 'armor', match: prefix('REAPER_'), min: 4, full: 4,
+    effect: ({ target }) => (target.mobs.includes('Undead')
+      ? { additive: 100, text: '+100% damage vs Undead' }
+      : { multiplier: 0.01, text: 'only 1% damage to non-Undead mobs' }),
+  },
+  // Crimson Isle armor pieces: +k% (additive) per piece worn vs Magmatic mobs.
+  ...[['magma_lord', 'Magma Lord Armor', prefix('MAGMA_LORD_'), 30], ['thunder', 'Thunder Armor', prefix('THUNDER_'), 20],
+    ['moogma_gear', 'Taurus Helmet / Flaming Chestplate / Moogma Leggings', ids('TAURUS_HELMET', 'FLAMING_CHESTPLATE', 'MOOGMA_LEGGINGS'), 10],
+  ].map(([id, name, match, per]) => ({
+    id, name, bonus: 'Magmatic damage', slot: 'armor', match, min: 1, full: id === 'moogma_gear' ? 3 : 4,
+    effect: ({ count, target }) => (target.mobs.includes('Magmatic')
+      ? { additive: per * count, text: `+${per * count}% damage vs Magmatic (${per}% per piece)` }
+      : { inactive: true, text: `+${per}% per piece vs Magmatic mobs` }),
+  })),
   // Single helmets with a damage ability (wiki, Damage Calculation source lists).
   {
     // ×(1 + 0.015 per digit of coins consumed), up to 1B coins (10 digits).

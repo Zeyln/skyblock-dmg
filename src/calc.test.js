@@ -710,3 +710,28 @@ describe('weapon bonuses without a target type', () => {
     expect(calculate({ weapon: w('PRISMARINE_BLADE'), player: { inWater: true } }).multMult).toBe(3);
   });
 });
+
+describe('armor damage bonuses', () => {
+  const set = (prefix, slots = ['HELMET', 'CHESTPLATE', 'LEGGINGS', 'BOOTS']) =>
+    slots.map((s) => ({ item: { id: `${prefix}${s}`, name: s, category: s, tier: 'LEGENDARY', stats: {} } }));
+  const vs = (mobs) => ({ mobs });
+
+  it('Magma Lord / Thunder / Moogma pieces: % per piece vs Magmatic', () => {
+    expect(calculate({ armor: set('MAGMA_LORD_'), target: vs(['Magmatic']) }).additiveMult).toBeCloseTo(2.2);
+    expect(calculate({ armor: set('THUNDER_', ['HELMET', 'BOOTS']), target: vs(['Magmatic']) }).additiveMult).toBeCloseTo(1.4);
+    expect(calculate({ armor: set('MAGMA_LORD_'), target: vs(['Undead']) }).additiveMult).toBe(1);
+    const moogma = [{ item: { id: 'TAURUS_HELMET', category: 'HELMET', tier: 'EPIC', stats: {} } },
+      { item: { id: 'MOOGMA_LEGGINGS', category: 'LEGGINGS', tier: 'EPIC', stats: {} } }];
+    expect(calculate({ armor: moogma, target: vs(['Magmatic']) }).additiveMult).toBeCloseTo(1.2);
+  });
+
+  it('Reaper Armor: +100% vs Undead, ×0.01 otherwise', () => {
+    expect(calculate({ armor: set('REAPER_'), target: vs(['Undead']) }).additiveMult).toBeCloseTo(2);
+    expect(calculate({ armor: set('REAPER_'), target: vs(['Animal']) }).multMult).toBeCloseTo(0.01);
+  });
+
+  it('Primordial Armor: +50% on the 3rd strike', () => {
+    expect(calculate({ armor: set('PRIMORDIAL_') }).additiveMult).toBe(1);
+    expect(calculate({ armor: set('PRIMORDIAL_'), setInputs: { primordial: { third: true } } }).additiveMult).toBeCloseTo(1.5);
+  });
+});
