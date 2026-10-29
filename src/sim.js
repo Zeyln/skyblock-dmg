@@ -3,7 +3,7 @@ import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
   FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_SHIELD_S,
   LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S, PILLAR_REACH_S,
-  DAGGER_FAMILIES, daggerFamily, bossPhases,
+  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, bossPhases,
 } from './data/mechanics.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
@@ -94,6 +94,16 @@ export function simulate(input, opts = {}) {
 
   const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0 } };
   const events = [];
+  // Ferocity strikes land FEROCITY_DELAY_S after their hit: the hit's own event, then one for the
+  // strikes (hits are at least 0.25 s apart, so they always land before the next hit).
+  // hpBefore: the target's HP before the hit, for the HP between the two.
+  const record = (ev, feroPart = 0, hpBefore) => {
+    if (!ev.ferocity) { events.push(ev); return; }
+    const hitPart = ev.damage - feroPart;
+    events.push({ ...ev, ferocity: 0, damage: hitPart, total: ev.total - feroPart, hp: hpBefore === undefined ? ev.hp : Math.max(0, hpBefore - hitPart) });
+    events.push({ t: ev.t + FEROCITY_DELAY_S, feroOnly: true, hit: 0, crit: false, ferocity: ev.ferocity, swipe: 0, bonuses: [],
+      damage: feroPart, total: ev.total, hp: ev.hp, maxHp: ev.maxHp, target: ev.target, shielded: ev.shielded });
+  };
   const endTick = Math.round((mode === 'kill' ? SIM_MAX_SECONDS : duration) * TICKS_PER_SECOND);
   let total = 0;
   let stacks = 0;
@@ -316,7 +326,7 @@ export function simulate(input, opts = {}) {
         shield = null;
         if (nextGlyph !== null && nextGlyph < t) nextGlyph = t + boss.glyphs.hold;
       }
-      events.push({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true });
+      record({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true });
       tick += ticksPerHit;
       continue;
     }
@@ -336,9 +346,11 @@ export function simulate(input, opts = {}) {
     out.damage.ferocity += feroDmg * strikes;
     out.damage.lightning += bolt;
     out.damage.swipes += swipe;
-    const dealt = hitDmg + feroDmg * strikes + bolt + swipe;
+    const feroPart = feroDmg * strikes;
+    const dealt = hitDmg + feroPart + bolt + swipe;
     total += dealt;
     if (demon) {
+      const before = demon.hp;
       demon.hp = Math.max(0, demon.hp - dealt);
       const other = demons.list[1 - demons.active];
       if (demon.hp <= 0) {
@@ -360,11 +372,12 @@ export function simulate(input, opts = {}) {
           showSplit(t, other.name);
         }
       }
-      events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name });
+      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name }, feroPart, before);
       tick += step;
       continue;
     }
     if (pup) {
+      const before = pup.hp;
       pup.hp = Math.max(0, pup.hp - dealt);
       if (pup.hp <= 0) {
         const killed = pups.filter((p) => p.hp <= 0).length;
@@ -373,10 +386,11 @@ export function simulate(input, opts = {}) {
           showPups(t, null);
         } else showPups(t, `${killed} of ${pups.length} pups killed`);
       }
-      events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup' });
+      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup' }, feroPart, before);
       tick += step;
       continue;
     }
+    const hpBefore = hp;
     if (maxHp) {
       hp = Math.max(0, hp - dealt);
       hpPct = hp / maxHp * 100;
@@ -385,7 +399,7 @@ export function simulate(input, opts = {}) {
       attuneHits = 0;
       attune = (attune + 1) % HELLION_ORDER.length;
     }
-    events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp, ...(broodOn ? { target: 'Conjoined Brood' } : {}) });
+    record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp, ...(broodOn ? { target: 'Conjoined Brood' } : {}) }, feroPart, hpBefore);
     if (maxHp && hp <= 0 && boss?.brood && !broodOn) {
       // Till Death Do Us Part: the Conjoined Brood takes over with more health and only its passives.
       broodOn = true;
@@ -397,7 +411,11 @@ export function simulate(input, opts = {}) {
       tick += ticksPerHit;
       continue;
     }
-    if (maxHp && hp <= 0) { killedAt = t; break; }
+    if (maxHp && hp <= 0) {
+      // Killed by the hit itself, or only by its Ferocity strikes a moment later.
+      killedAt = strikes && hpBefore - (dealt - feroPart) > 0 ? t + FEROCITY_DELAY_S : t;
+      break;
+    }
     while (!demons && !pups && triggers.length && hp <= triggers[0].f * maxHp) {
       const { kind, f } = triggers.shift();
       trigger(kind, t, f);

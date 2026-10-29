@@ -95,6 +95,19 @@ describe('per-hit effects', () => {
 });
 
 describe('playback events', () => {
+  it('Ferocity strikes land 100 ms after their hit, as their own event', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 200 }) }), { duration: 1 });
+    expect(s.events.map((e) => [e.t, e.feroOnly ? 'fero' : 'hit', e.damage])).toEqual([
+      [0, 'hit', 100], [0.1, 'fero', 200], [0.5, 'hit', 100], [0.6, 'fero', 200]]);
+    expect(s.total).toBe(600);
+  });
+
+  it('a kill by Ferocity strikes alone lands 100 ms after the hit', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 100 }) }, { target: { maxHp: 150 } }), { mode: 'kill' });
+    expect(s.killedAt).toBeCloseTo(0.1);
+  });
+
+
   it('one event per hit, in time order, with procs named', () => {
     const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }), enchants: { thunderlord: 7, first_strike: 4 } }), { duration: 2 });
     expect(s.events.map((e) => e.t)).toEqual([0, 0.5, 1, 1.5]);
@@ -151,9 +164,13 @@ describe('Voidgloom Seraph phases', () => {
   it('Hitshield takes hits, Ferocity counts toward it and is divided by 4 once it is down', () => {
     const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 400 }) }, { target: seraph('I', 1e9) }), { duration: 5 });
     // 15-hit shield, 5 hits per swing (1 + 4 Ferocity strikes): 3 swings.
-    expect(s.events.slice(0, 3).every((e) => e.shielded && e.damage === 0)).toBe(true);
-    expect(s.events[3].shielded).toBeUndefined();
-    expect(s.events[3].ferocity).toBe(1); // 400 / 4
+    const hits = s.events.filter((e) => !e.feroOnly);
+    expect(hits.slice(0, 3).every((e) => e.shielded && e.damage === 0)).toBe(true);
+    expect(hits[3].shielded).toBeUndefined();
+    // Its Ferocity strike: 400 / 4 = 1, landing 100 ms after the hit.
+    const strike = s.events[s.events.indexOf(hits[3]) + 1];
+    expect(strike).toMatchObject({ feroOnly: true, ferocity: 1 });
+    expect(strike.t - hits[3].t).toBeCloseTo(0.1);
     expect(s.phases[0]).toMatchObject({ kind: 'shield', start: 0, end: 1 });
   });
 
@@ -200,7 +217,7 @@ describe('Voidgloom Seraph phases', () => {
   it('other enemies have no phases', () => {
     const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 400 }) }, { target: { maxHp: 1e9 } }), { duration: 1 });
     expect(s.phases).toEqual([]);
-    expect(s.events[0].ferocity).toBe(4);
+    expect(s.events[1]).toMatchObject({ feroOnly: true, ferocity: 4 });
   });
 });
 
@@ -277,9 +294,10 @@ describe('Inferno Demonlord phases', () => {
 
   it('one dagger: the wrong attunement and all Ferocity lose 99%', () => {
     const s = run(dagger('HEARTFIRE_DAGGER', 95, { FEROCITY: 100 }), null, lord('II', 1e9), { mode: 'duration', duration: 9 });
-    expect(s.events[0].hit).toBe(200);
-    expect(s.events[0].damage).toBe(200 + 2); // the Ferocity strike: 1%
-    expect(s.events[8].hit).toBe(2); // Spirit, no Twilight-family dagger
+    const hits = s.events.filter((e) => !e.feroOnly);
+    expect(hits[0].hit).toBe(200);
+    expect(s.events[1]).toMatchObject({ feroOnly: true, damage: 2 }); // the Ferocity strike: 1%
+    expect(hits[8].hit).toBe(2); // Spirit, no Twilight-family dagger
   });
 
   it('Demonsplit at 50%: the boss waits at 5M while Quazii and Typhoeus trade shields', () => {

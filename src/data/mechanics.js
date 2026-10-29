@@ -924,6 +924,8 @@ export const PROGRESSION_ITEMS = {
 export const TICKS_PER_SECOND = 20;
 export const ATTACK_SPEED_CAP = 100;
 export const FEROCITY_CAP = 500;
+// Ferocity strikes land a moment after the hit that set them off (not documented; 100 ms as observed in play).
+export const FEROCITY_DELAY_S = 0.1;
 // Melee: the enemy's invulnerability ticks after a hit, round(10 / (1 + AS/100)).
 export const meleeHitTicks = (as) => Math.round(10 / (1 + Math.min(ATTACK_SPEED_CAP, Math.max(0, as)) / 100));
 // Shortbows: shot cooldown, rounded up. Other bows are assumed fully drawn (1 s) each shot.

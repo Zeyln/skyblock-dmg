@@ -1555,7 +1555,8 @@ function renderSim(body) {
       total = e.total;
       // Average so far, as of this hit (blank for the first second, when it would swing wildly).
       dps.v.textContent = e.t >= 1 ? fmt(total / e.t) : '—';
-      procs.hit.fire();
+      // Ferocity strikes arrive as their own event a moment after the hit.
+      if (!e.feroOnly) procs.hit.fire();
       if (e.ferocity) procs.ferocity.fire();
       if (e.swipe) procs.swipe.fire();
       if (e.bonuses.length) procs.bonus.fire(e.bonuses);
