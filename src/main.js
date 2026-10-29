@@ -121,8 +121,9 @@ function numField(label, path, opts = {}) {
     h('input', { type: 'number', step: opts.step ?? 'any', min: opts.min, max: opts.max, value: getPath(path) ?? '',
       placeholder: opts.placeholder ?? '0', 'data-path': path, 'data-num': '1', 'data-rerender': opts.rerender ? '1' : null }));
 }
-function checkField(label, path, opts = {}) {
-  return h('label', { class: 'check' },
+// On/off setting shown as a toggle chip (place chips in an h('div', { class: 'chips' }) row).
+function chipField(label, path, opts = {}) {
+  return h('label', { title: opts.title || null },
     h('input', { type: 'checkbox', checked: !!getPath(path), 'data-path': path, 'data-rerender': opts.rerender ? '1' : null }), label);
 }
 // Option list entries are [value, label] tuples or full combo option objects.
@@ -932,13 +933,11 @@ function bonusSection() {
     h('div', { class: 'grid' },
       numField('Combat level', 'combatLevel', { min: 0, max: 60, step: 1 }),
       numField(`Catacombs level (0–${CATACOMBS_MAX_LEVEL})`, 'catacombsLevel', { min: 0, max: CATACOMBS_MAX_LEVEL, step: 1, rerender: true }),
-      h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px', title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' },
-        h('input', { type: 'checkbox', checked: !!state.godPotion, 'data-path': 'godPotion', 'data-rerender': '1' }),
-        'God Potion active'),
-      // Only one of them can be mayor: ticking one unticks the other.
-      ...Object.entries(MAYORS).map(([id, name]) => h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px', title: MAYOR_EFFECTS[id] },
-        h('input', { type: 'checkbox', checked: state.mayor === id, onchange: (e) => { state.mayor = e.target.checked ? id : ''; rerenderForm(); } }),
-        `${name} is mayor`))),
+      // Only special mayors that change a hit are listed.
+      selectField('Mayor', 'mayor', [{ value: '', label: 'Other / none', cls: 'muted' },
+        ...Object.entries(MAYORS).map(([id, name]) => ({ value: id, label: name, note: MAYOR_EFFECTS[id] }))], { rerender: true }),
+      h('div', { class: 'chips', style: 'align-self:end;padding-bottom:6px' },
+        chipField('God Potion', 'godPotion', { rerender: true, title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' }))),
     sub('buffs-custom', ['Custom bonuses ', countBadge(() => usedRows().length)],
       'Pets effects, potions, accessories, abilities…', [
         h('div', { class: 'table-scroll' }, h('table', { class: 'rows' },
@@ -1014,12 +1013,9 @@ function dungeonControls() {
   let controls;
   if (!lock) {
     controls = [
-      h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: inDungeon, onchange: (ev) => set(ev.target.checked ? 'catacombs' : 'none') }),
-        h('strong', {}, 'In dungeon')),
-      inDungeon ? h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: state.dungeonMode === 'master', onchange: (ev) => set(ev.target.checked ? 'master' : 'catacombs') }),
-        'Master Mode') : '',
+      h('div', { class: 'field location-field' }, h('span', { class: 'field-label' }, 'Location'),
+        actionSelect(null, [['none', 'Outside dungeons'], ['catacombs', 'Catacombs'], ['master', 'Master Mode']],
+          inDungeon ? state.dungeonMode : 'none', set, { searchable: false, ariaLabel: 'Location' })),
     ];
   } else if (lock === 'either') {
     // Regular dungeon mob: always in a dungeon, user picks the floor (F = Catacombs, M = Master Mode).
@@ -1116,7 +1112,7 @@ function targetSection() {
       presetView ? '' : numField('Target max HP', 'target.maxHp', { min: 0 }),
       presetView ? '' : numField('Target defense', 'target.defense', { min: 0 }),
       numField('Your max HP', 'player.maxHp', { min: 0 }),
-      presetView ? '' : h('div', { style: 'align-self:end;padding-bottom:8px' }, checkField('Boss / miniboss', 'target.boss'))),
+      presetView ? '' : h('div', { class: 'chips', style: 'align-self:end;padding-bottom:6px' }, chipField('Boss / miniboss', 'target.boss'))),
     presetView ? '' : sub('target-types', ['Enemy types ', countBadge(typeCount)],
       () => [...(state.target.mobs || []), ...(state.target.families || [])].join(', ') || 'none', [
         targetChips('mobs', MOB_TYPES),
@@ -1128,13 +1124,14 @@ function targetSection() {
       state.player.lowHealth ? 'below 20% HP' : '', state.player.recentlyHit ? 'just hit' : '',
       state.target.attackedYou ? 'target attacked you' : '', state.target.isolated ? 'isolated target' : '',
       { close: 'within 1.5 blocks', far: '3+ blocks away' }[state.target.distance] || '') || 'default', [
-      h('div', { class: 'grid' },
-        checkField('First hit(s) on mob', 'player.firstHit'),
-        checkField('At full health', 'player.fullHealth', { rerender: true }),
-        checkField('Below 20% health', 'player.lowHealth', { rerender: true }),
-        checkField('Was just hit', 'player.recentlyHit', { rerender: true }),
-        checkField('Target has attacked you', 'target.attackedYou'),
-        checkField('No other mobs within 15 blocks', 'target.isolated'),
+      h('div', { class: 'chips' },
+        chipField('First hit(s) on mob', 'player.firstHit'),
+        chipField('At full health', 'player.fullHealth', { rerender: true }),
+        chipField('Below 20% health', 'player.lowHealth', { rerender: true }),
+        chipField('Was just hit', 'player.recentlyHit', { rerender: true }),
+        chipField('Target has attacked you', 'target.attackedYou'),
+        chipField('No other mobs within 15 blocks', 'target.isolated')),
+      h('div', { class: 'grid', style: 'margin-top:12px' },
         selectField('Distance to target', 'target.distance',
           [['close', 'Within 1.5 blocks'], ['normal', '1.5–3 blocks'], ['far', 'More than 3 blocks']])),
       // Possible (absorption, a 0-damage hit) but unusual: a hit normally takes you below full health.
@@ -1361,7 +1358,7 @@ function trackResultsOverflow() {
 // ---------- mayors ----------
 // Special mayors that change a hit (calc.js applies them).
 const MAYORS = { derpy: 'Derpy', jerry: 'Jerry' };
-const MAYOR_EFFECTS = { derpy: 'Mobs have 2x health', jerry: '+10% to all combat stats (additive with other % stat boosts)' };
+const MAYOR_EFFECTS = { derpy: '2× mob health', jerry: '+10% combat stats' };
 
 // ---------- theme ----------
 // The logo switches between the light and dark theme. index.html applies the saved (or system)

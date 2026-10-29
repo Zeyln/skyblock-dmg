@@ -516,13 +516,14 @@ button.link:hover { color: var(--crit); }
 
 .grid.disabled { opacity: .4; pointer-events: none; }
 .conflict { color: var(--crit); font-size: 11px; }
-.mobs { display: flex; flex-wrap: wrap; gap: 6px; }
-.mobs label {
+/* Toggle chips: the enemy-type chips (.mobs) and on/off settings (.chips, chipField in main.js). */
+.mobs, .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+:is(.mobs, .chips) label {
   --bc: var(--line-strong); border: var(--px) solid var(--bc); border-radius: 999px; padding: 4px 11px; cursor: pointer;
   user-select: none; font-size: 12.5px; --face: var(--inset); background: var(--inset);
 }
-.mobs input { display: none; }
-.mobs label:has(input:checked) { --face: var(--accent); background: var(--accent); --bc: var(--accent); color: var(--on-accent); }
+:is(.mobs, .chips) input { display: none; }
+:is(.mobs, .chips) label:has(input:checked) { --face: var(--accent); background: var(--accent); --bc: var(--accent); color: var(--on-accent); }
 
 /* fight location strip */
 .location {
@@ -538,7 +539,7 @@ button.link:hover { color: var(--crit); }
 .location .hint { flex-basis: 100%; margin: 0; }
 .location .class-row { flex-basis: 100%; }
 /* Floor picker for regular dungeon mobs: a small dropdown (its list is a two-column grid). */
-.location .floor-field { width: 150px; }
+.location :is(.floor-field, .location-field) { width: 180px; }
 .segmented { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--chip); }
 .segmented label { padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .segmented input { display: none; }
@@ -743,7 +744,7 @@ h1, .panel-title, .card h2, .modal h2,
    --c1..--c3 are the step offsets from the corner; small elements take 2 steps (c2 = c1),
    large surfaces 3. The bottom edge sits --press above the box bottom (pressable buttons). */
 .notch, .panel, .card, .combo-pop, .modal, .sub, .set-row, .location, .presets, .chain-row, .stat-tiles div,
-input, button, .combo-btn, .combo-field, .mobs label, .tag, .count, .context span, .badge, .segmented, .segmented label,
+input, button, .combo-btn, .combo-field, :is(.mobs, .chips) label, .tag, .count, .context span, .badge, .segmented, .segmented label,
 .nav button, .formula, .topbar, .hero-panel {
   --c1: var(--px);
   --c2: var(--px);
@@ -787,7 +788,7 @@ input[type=radio] { clip-path: none; }
    The CSS border only reserves the outline's space (it is transparent).
    (--xN, --yN) are the face rectangles' insets in pixels: (1,2) (2,1) for two-step corners,
    (1,3) (2,2) (3,1) for three-step corners. */
-.glass, .sub, .set-row, .location, .mobs label, .combo-btn, .combo-field,
+.glass, .sub, .set-row, .location, :is(.mobs, .chips) label, .combo-btn, .combo-field,
 input:not([type=checkbox]):not([type=radio]):not(.combo-input), button:not(.logo):not(.link) {
   --x1: 1; --y1: 2; --x2: 2; --y2: 1; --x3: 1; --y3: 2;
   --f: linear-gradient(var(--face), var(--face));
@@ -818,7 +819,7 @@ input:not([type=checkbox]):not([type=radio]):not(.combo-input), button:not(.logo
    Pressing moves the button down into the wall's space while the wall shrinks by the same
    amount, so the bottom edge stays put: hover = half a pixel, click = a full pixel.
    Dropdown triggers look like fields and the header's text buttons are flat: no wall. */
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button), .mobs label {
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button), :is(.mobs, .chips) label {
   --press: 0px;
   --wall-c: color-mix(in srgb, var(--bc), #000 var(--wall-mix));
   --o: linear-gradient(var(--bc), var(--bc));
@@ -835,8 +836,8 @@ button:not(.link):not(.logo):not(.combo-btn):not(.nav button), .mobs label {
     calc(100% - var(--px) * 4) calc(100% - var(--px)) !important;
   transform: translateY(var(--press));
 }
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button):hover:not(:disabled), .mobs label:hover { --press: calc(var(--px) / 2); }
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button):active:not(:disabled), .mobs label:active { --press: var(--px); }
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):hover:not(:disabled), :is(.mobs, .chips) label:hover { --press: calc(var(--px) / 2); }
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):active:not(:disabled), :is(.mobs, .chips) label:active { --press: var(--px); }
 
 /* Options, highlights and selection rows: square. */
 .combo-opt, .combo-opt mark, .nav button, .chain-row.total, mark { border-radius: 0; }
