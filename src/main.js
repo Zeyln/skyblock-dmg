@@ -52,6 +52,7 @@ const defaultState = () => ({
   dungeonClass: { id: '', level: 50, solo: false },
   setInputs: {},
   godPotion: false,
+  mayor: '', // '' | 'derpy' | 'jerry'
   bonuses: [
     { label: 'Pet effects not modeled' }, { label: 'Accessories (flat stats)' }, { label: 'Potions / buffs' }, { label: 'Other' },
   ],
@@ -900,14 +901,18 @@ function bonusSection() {
     .some((k) => b[k]) || (b.multiplier && b.multiplier !== 1));
   const summary = () => joinParts(
     `Combat ${state.combatLevel || 0}`, `Catacombs ${clampCatacombs(state.catacombsLevel)}`,
-    state.godPotion ? 'God Potion' : '', usedRows().length ? `${usedRows().length} custom bonus${usedRows().length > 1 ? 'es' : ''}` : '');
+    state.godPotion ? 'God Potion' : '', MAYORS[state.mayor] ? `Mayor ${MAYORS[state.mayor]}` : '', usedRows().length ? `${usedRows().length} custom bonus${usedRows().length > 1 ? 'es' : ''}` : '');
   return panel('buffs', 'Buffs & skills', summary, [
     h('div', { class: 'grid' },
       numField('Combat level', 'combatLevel', { min: 0, max: 60, step: 1 }),
       numField(`Catacombs level (0–${CATACOMBS_MAX_LEVEL})`, 'catacombsLevel', { min: 0, max: CATACOMBS_MAX_LEVEL, step: 1, rerender: true }),
       h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px', title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' },
         h('input', { type: 'checkbox', checked: !!state.godPotion, 'data-path': 'godPotion', 'data-rerender': '1' }),
-        'God Potion active')),
+        'God Potion active'),
+      // Only one of them can be mayor: ticking one unticks the other.
+      ...Object.entries(MAYORS).map(([id, name]) => h('label', { class: 'check', style: 'align-self:end;padding-bottom:8px', title: MAYOR_EFFECTS[id] },
+        h('input', { type: 'checkbox', checked: state.mayor === id, onchange: (e) => { state.mayor = e.target.checked ? id : ''; rerenderForm(); } }),
+        `${name} is mayor`))),
     sub('buffs-custom', ['Custom bonuses ', countBadge(() => usedRows().length)],
       'Pets effects, potions, accessories, abilities…', [
         h('div', { class: 'table-scroll' }, h('table', { class: 'rows' },
@@ -1185,6 +1190,7 @@ function buildInput() {
     catacombsLevel: state.catacombsLevel,
     dungeonMode: state.dungeonMode,
     godPotion: state.godPotion,
+    mayor: state.mayor,
     dungeonClass: state.dungeonClass,
     setInputs: state.setInputs,
     bonuses: state.bonuses,
@@ -1308,6 +1314,11 @@ function trackResultsOverflow() {
   new MutationObserver(set).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] });
   set();
 }
+
+// ---------- mayors ----------
+// Special mayors that change a hit (calc.js applies them).
+const MAYORS = { derpy: 'Derpy', jerry: 'Jerry' };
+const MAYOR_EFFECTS = { derpy: 'Mobs have 2x health', jerry: '+10% to all combat stats (additive with other % stat boosts)' };
 
 // ---------- theme ----------
 // The logo switches between the light and dark theme. index.html applies the saved (or system)

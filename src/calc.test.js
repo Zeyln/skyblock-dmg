@@ -100,6 +100,24 @@ describe('target-dependent bonuses', () => {
   });
 });
 
+describe('mayors', () => {
+  it('Jerry adds 10% to combat stats', () => {
+    const r = calculate({ weapon: { item: sword({ DAMAGE: 100, STRENGTH: 100 }) }, mayor: 'jerry' });
+    // Strength 100 -> 110: 105 * 2.1 = 220.5 -> 220; Crit Damage 50 -> 55
+    expect(r.nonCrit).toBe(220);
+    expect(r.critMult).toBeCloseTo(1.55);
+  });
+
+  it('Derpy doubles the target max HP for HP-based effects', () => {
+    const hit = (mayor) => calculate({
+      weapon: { item: sword({ DAMAGE: 95 }), enchants: { giant_killer: 1 } },
+      target: { maxHp: 1100 }, player: { maxHp: 1000 }, mayor,
+    });
+    expect(hit('').additiveMult).toBeCloseTo(1.01);      // 10% more HP -> +1%
+    expect(hit('derpy').additiveMult).toBeCloseTo(1.05); // 2,200 HP -> capped at +5%
+  });
+});
+
 describe('accessories', () => {
   it('power multiplier matches wiki value at 250 MP', () => {
     expect(powerMultiplier(250)).toBeCloseTo(9.64, 1);

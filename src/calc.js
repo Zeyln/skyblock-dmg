@@ -2,7 +2,7 @@ import {
   BASE_PLAYER_STATS, ENCHANTS, weaponMultipliers, SWORD_REFORGES, BOW_REFORGES, ARMOR_REFORGES,
   RARITIES, GEMS, gemValue, PROGRESSION_ITEMS, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
-  ULTIMATE_ENCHANTS, ultimatesFor, enchantConflict, GOD_POTION, QUALITY_MAX, floorLabel, isDungeonDrop,
+  ULTIMATE_ENCHANTS, ultimatesFor, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
@@ -153,15 +153,19 @@ function pieceSources(piece, kind, input, statPct) {
  * where Additive = 1 + sum(additive %)/100 and Multiplicative = product of multipliers.
  */
 export function calculate(input) {
+  const notes = [];
   const target = { mobs: [], families: [], boss: false, hpPct: 100, maxHp: 0, defense: 0, ...input.target };
+  // Mayor Derpy doubles mob health (matters for effects that use the target's max HP).
+  if (input.mayor === 'derpy') {
+    target.maxHp *= 2;
+    if (target.maxHp) notes.push('Mayor Derpy: target max HP doubled.');
+  }
   const player = { maxHp: 0, fullHealth: true, lowHealth: false, recentlyHit: false, firstHit: true, ...input.player };
   const weapon = input.weapon || {};
   const bow = isBow(weapon.item);
   const sources = []; // { label, stats } for the stat breakdown
   const additive = []; // { label, value }
   const multiplicative = []; // { label, value }
-  const notes = [];
-
   const statPct = {};
 
   // --- Stats ---
@@ -312,6 +316,9 @@ export function calculate(input) {
     sources.push({ label: 'God Potion', stats: { ...GOD_POTION.stats } });
     if (bow) additive.push({ label: 'God Potion: Archery IV', value: GOD_POTION.bowAdditive });
   }
+
+  // Mayor Jerry: +10% to all combat stats, added to the other percentage stat boosts.
+  if (input.mayor === 'jerry') statPct.__all = (statPct.__all || 0) + MAYOR_JERRY_STAT_PCT;
 
   // Combat skill
   const combat = combatWarriorBonus(input.combatLevel);

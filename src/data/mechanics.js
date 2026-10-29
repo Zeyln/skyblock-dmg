@@ -516,6 +516,9 @@ export const SWORD_REFORGES = {
 };
 
 // ---------- God Potion ----------
+// Mayor Jerry: +10% to all combat stats, added to the other percentage stat boosts (calc.js).
+export const MAYOR_JERRY_STAT_PCT = 10;
+
 // Damage-relevant effects (wiki "God Potion Effect", values include its brew boosts):
 // Strength VIII +78.75, Critical IV +25 CC / +40 CD, Spirit IV +40 CD, Archery IV +80% bow damage.
 export const GOD_POTION = {
