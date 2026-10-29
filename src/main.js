@@ -912,6 +912,10 @@ function petSection() {
       numField('Bank coins', 'petExtras.bankCoins', { min: 0 }),
       numField('Magic Find', 'petExtras.magicFind', { min: 0 }),
       numField('Gold collection digits', 'petExtras.goldDigits', { min: 0, max: 9, step: 1 })) : '',
+    state.pet.id === 'PIGMAN' ? h('div', { class: 'grid', style: 'margin-top:8px' },
+      numField('Target mob level (Giant Slayer)', 'petExtras.targetLevel', { min: 1, step: 1, placeholder: '100+' })) : '',
+    state.pet.id === 'ROCK' ? h('div', { class: 'chips', style: 'margin-top:8px' },
+      chipField('Sitting on your rock (Steady Ground)', 'petExtras.onRock')) : '',
     h('div', { id: 'pet-lore', class: 'pet-lore' }),
   );
   ensurePetLore();

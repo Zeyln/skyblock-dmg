@@ -735,3 +735,35 @@ describe('armor damage bonuses', () => {
     expect(calculate({ armor: set('PRIMORDIAL_'), setInputs: { primordial: { third: true } } }).additiveMult).toBeCloseTo(1.5);
   });
 });
+
+describe('more pet perks', () => {
+  const nums = (other) => ({ LEGENDARY: { 1: { otherNums: other, statNums: {} }, 100: { otherNums: other, statNums: {} } } });
+  const petnums = { PIGMAN: nums([30, 40, 25]), BAT: nums([20, 30, 50, 50]), ROCK: nums([25, 1.3]), GOLEM: nums([20]) };
+  const pet = (id, lore) => ({ id, name: id, rarity: 'LEGENDARY', level: 100, ...petNumbers(petnums, id, 'LEGENDARY', 100), lore: cleanLore(lore) });
+  const sword = { item: { id: 'TEST_SWORD', name: 'Test', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95 } } };
+
+  it('Pigman Giant Slayer: +75% vs level 100+, +50% vs 50+', () => {
+    const p = pet('PIGMAN', ['Giant Slayer', 'Deal +50% damage to monsters Level', '50+ and +75% damage to monsters', 'Level 100+.']);
+    expect(calculate({ weapon: sword, pet: p }).additiveMult).toBeCloseTo(1.75);
+    expect(calculate({ weapon: sword, pet: p, petExtras: { targetLevel: 60 } }).additiveMult).toBeCloseTo(1.5);
+    expect(calculate({ weapon: sword, pet: p, petExtras: { targetLevel: 20 } }).additiveMult).toBe(1);
+  });
+
+  it('Bat Wings of Steel: ×(1 + k%) vs Spooky', () => {
+    const p = pet('BAT', ['Wings of Steel', 'Deals +{3}% damage to Spooky', 'enemies during the Spooky Festival.']);
+    expect(calculate({ weapon: sword, pet: p, target: { mobs: ['Spooky'] } }).multMult).toBeCloseTo(1.5);
+    expect(calculate({ weapon: sword, pet: p }).multMult).toBe(1);
+  });
+
+  it('Rock Steady Ground: ×1.3 while sitting on it', () => {
+    const p = pet('ROCK', ['Steady Ground', 'While sitting on your rock, deal +{1}x', 'damage']);
+    expect(calculate({ weapon: sword, pet: p, petExtras: { onRock: true } }).multMult).toBeCloseTo(1.3);
+    expect(calculate({ weapon: sword, pet: p }).multMult).toBe(1);
+  });
+
+  it('Golem Toss: ×5 only on a toss hit (set by the simulation)', () => {
+    const p = pet('GOLEM', ['Toss', 'Every 5 hits, throw the enemy up into', 'the air and deal 5x damage (5s', 'cooldown)']);
+    expect(calculate({ weapon: sword, pet: p }).multMult).toBe(1);
+    expect(calculate({ weapon: sword, pet: p, player: { toss: true } }).multMult).toBe(5);
+  });
+});

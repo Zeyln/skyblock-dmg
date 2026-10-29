@@ -74,6 +74,8 @@ export const PET_ITEMS = {
 // return placeholder indices into otherNums. Each rule's apply() turns values into effects.
 // ctx: { target, player, weaponId, bow, inDungeon, extras }
 const R = (pet, name, re, apply) => ({ pet, name, re, apply });
+// For lore with the numbers written out (no {n} placeholders): captures are read as numbers.
+const RAW = (pet, name, re, apply) => ({ ...R(pet, name, re, apply), raw: true });
 const N = '\\{(\\d+)\\}';
 const mob = (m) => (ctx) => ctx.target.mobs.includes(m);
 
@@ -107,6 +109,21 @@ export const PET_RULES = [
     ([v], ctx) => (ctx.target.distance === 'close' ? { additive: v } : null)),
   R('TYRANNOSAURUS', 'Tyrant', new RegExp(`Combat stats granted by pet items on this pet are increased by ${N}%`),
     ([v]) => ({ petItemBoost: v })),
+  // Additive by the target's level (the player enters it under the pet; unset counts as 100+).
+  RAW('PIGMAN', 'Giant Slayer', /Deal \+(\d+)% damage to monsters Level 50\+ and \+(\d+)% damage to monsters Level 100\+/,
+    ([lo, hi], ctx) => {
+      const level = ctx.extras.targetLevel ?? 100;
+      return level >= 100 ? { additive: hi } : level >= 50 ? { additive: lo } : null;
+    }),
+  // Multiplicative (wiki): Spooky mobs only appear during the Spooky Festival.
+  R('BAT', 'Wings of Steel', new RegExp(`Deals \\+${N}% damage to Spooky enemies`),
+    ([v], ctx) => (mob('Spooky')(ctx) ? { multiplier: 1 + v / 100 } : null)),
+  R('ROCK', 'Steady Ground', new RegExp(`While sitting on your rock, deal \\+${N}x damage`),
+    ([v], ctx) => (ctx.extras.onRock ? { multiplier: v } : null)),
+  // Every 5th hit (5 s cooldown), ×5: only the simulation counts hits (it sets player.toss).
+  RAW('GOLEM', 'Toss', /Every 5 hits, throw the enemy up into the air and deal (\d+)x damage/,
+    ([v], ctx) => (ctx.player.toss ? { multiplier: v } : null)),
+  // Not added: Bal's Cannibal (damage to Bal, which isn't a target here).
   R('GIRAFFE', 'Long Neck', new RegExp(`Increases your melee damage by ${N}% if you are more than 3 blocks away`),
     ([v], ctx) => (!ctx.bow && ctx.target.distance === 'far' ? { additive: v } : null)),
   R('GRIFFIN', 'Sacred Strength', new RegExp(`Gain \\+${N}%\\s*Strength when above 85%\\s*Health`),
@@ -164,7 +181,7 @@ export function applyPet(pet, ctx) {
     if (rule.pet !== pet.id) continue;
     const m = lore.match(rule.re);
     if (!m) continue;
-    const values = m.slice(1).map((i) => pet.otherNums[+i] ?? 0);
+    const values = m.slice(1).map((i) => (rule.raw ? +i : pet.otherNums[+i] ?? 0));
     const eff = rule.apply(values, ctx);
     result.abilities.push({ name: rule.name, active: !!eff });
     if (eff) effects.push({ name: rule.name, ...eff });

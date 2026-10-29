@@ -64,19 +64,19 @@ export function simulate(input, opts = {}) {
   let side = null;
   // The single-hit result for a hit's state; most hits share one, so cache them.
   const cache = new Map();
-  const hitResult = (n, stacks, w = 0) => {
+  const hitResult = (n, stacks, w = 0, toss = false) => {
     const tenth = n % 10 === 0;
     const fourth = n % 4 === 0;
     const third = n % 3 === 0; // Primordial Armor
     const pct = side ? Math.round(side.pct * 10) / 10 : maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
-    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}`;
+    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}|${toss}`;
     let r = cache.get(key);
     if (!r) {
       const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * boss.brood.hpMult } : {};
       r = calculate({
         ...input,
         weapon: weapons[w] || input.weapon,
-        player: { ...player, hitNumber: n },
+        player: { ...player, hitNumber: n, toss },
         target: { ...input.target, hpPct: pct, ...targetMax },
         accessoryInputs: { ...input.accessoryInputs, tenthHit: tenth },
         setInputs: { ...input.setInputs, crimson: { ...input.setInputs?.crimson, stacks }, tarantula: { ...input.setInputs?.tarantula, fourth },
@@ -88,6 +88,7 @@ export function simulate(input, opts = {}) {
         n <= 3 && labels.find((l) => /^(First Strike|Triple-Strike)/.test(l)),
         tenth && labels.find((l) => l.startsWith('Tarantula Talisman')) && 'Tarantula Talisman',
         (fourth || third) && labels.find((l) => l.includes('Octodexterity')) && 'Octodexterity',
+        toss && labels.find((l) => l.includes('Toss')) && 'Toss',
       ].filter(Boolean).map((l) => l.replace(/ [IVX]+$/, ''));
       cache.set(key, r);
     }
@@ -111,6 +112,7 @@ export function simulate(input, opts = {}) {
   let stacks = 0;
   let lastStackTick = -Infinity;
   let killedAt = null;
+  let lastToss = -Infinity;
 
   // Boss phases (data/mechanics.js bossPhases): each is { kind, start, end } in seconds, for the
   // indicator. HP thresholds trigger in order as the boss's HP falls past them.
@@ -346,7 +348,10 @@ export function simulate(input, opts = {}) {
       stacks = Math.min(DOMINUS_MAX, stacks + 1);
       lastStackTick = tick;
     }
-    const r = hitResult(n, stacks, w);
+    // Golem pet Toss: every 5th hit, at most once per 5 s.
+    const toss = input.pet?.id === 'GOLEM' && n % 5 === 0 && t - lastToss >= 5;
+    if (toss) lastToss = t;
+    const r = hitResult(n, stacks, w, toss);
     // The second dagger may swing at its own speed.
     const step = w && !bow ? meleeHitTicks(r.totals.ATTACK_SPEED || 0) : ticksPerHit;
     const bonuses = [...r.procs];

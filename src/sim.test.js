@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { simulate } from './sim.js';
 import { calculate } from './calc.js';
 import { meleeHitTicks, shortbowTicks } from './data/mechanics.js';
+import { petNumbers, cleanLore } from './data/pets.js';
 
 const sword = (stats, extra = {}) => ({ id: 'TEST_SWORD', name: 'Test', category: 'SWORD', tier: 'LEGENDARY', stats, ...extra });
 // No crits (0 crit chance) unless a test wants them.
@@ -412,5 +413,17 @@ describe('Primordial Armor in the simulation', () => {
     const armor = ['HELMET', 'CHESTPLATE', 'LEGGINGS', 'BOOTS'].map((s) => ({ item: { id: `PRIMORDIAL_${s}`, name: s, category: s, tier: 'LEGENDARY', stats: {} } }));
     const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { armor }), { duration: 3 });
     expect(s.events.map((e) => e.hit)).toEqual([100, 100, 150, 100, 100, 150]);
+  });
+});
+
+describe('Golem Toss in the simulation', () => {
+  it('every 5th hit, at most once per 5 s', () => {
+    const nums = { GOLEM: { LEGENDARY: { 1: { otherNums: [20], statNums: {} }, 100: { otherNums: [20], statNums: {} } } } };
+    const pet = { id: 'GOLEM', name: 'Golem', rarity: 'LEGENDARY', level: 100, ...petNumbers(nums, 'GOLEM', 'LEGENDARY', 100),
+      lore: cleanLore(['Toss', 'Every 5 hits, throw the enemy up into', 'the air and deal 5x damage (5s', 'cooldown)']) };
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { pet }), { duration: 10 });
+    // Hits every 0.5 s: hit 5 at 2 s tosses; hit 10 (4.5 s) is on cooldown; hit 15 (7 s) tosses.
+    const tossed = s.events.filter((e) => e.hit === 500).map((e) => e.t);
+    expect(tossed).toEqual([2, 7]);
   });
 });
