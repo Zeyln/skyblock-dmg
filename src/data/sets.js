@@ -214,6 +214,14 @@ export const SETS = [
 
   // ---------- Equipment ----------
   {
+    // ×1.01 vs dragons (the wiki marks it as needing confirmation).
+    id: 'dragonfade', name: 'Dragonfade Cloak', bonus: 'Dragon damage', slot: 'equipment',
+    match: ids('DRAGONFADE_CLOAK'), min: 1, full: 1,
+    effect: ({ target }) => (target.families.includes('Dragon')
+      ? { multiplier: 1.01, text: '×1.01 damage vs Dragons' }
+      : { inactive: true, text: '×1.01 damage vs Dragons' }),
+  },
+  {
     id: 'vanq_magma', name: 'Vanquished Magma Necklace', bonus: 'Magma Cube Absorber', slot: 'equipment',
     match: ids('VANQUISHED_MAGMA_NECKLACE'), min: 1, full: 1,
     inputs: [{ key: 'kills', label: 'Magma Cubes killed', type: 'number', min: 0, def: 10000 }],

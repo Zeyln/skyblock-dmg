@@ -767,3 +767,11 @@ describe('more pet perks', () => {
     expect(calculate({ weapon: sword, pet: p, player: { toss: true } }).multMult).toBe(5);
   });
 });
+
+describe('equipment damage bonuses', () => {
+  it('Dragonfade Cloak: ×1.01 vs dragons', () => {
+    const equipment = [{ item: { id: 'DRAGONFADE_CLOAK', name: 'Cloak', category: 'CLOAK', tier: 'LEGENDARY', stats: {} } }];
+    expect(calculate({ equipment, target: { mobs: ['Ender'], families: ['Dragon'] } }).multMult).toBeCloseTo(1.01);
+    expect(calculate({ equipment }).multMult).toBe(1);
+  });
+});
