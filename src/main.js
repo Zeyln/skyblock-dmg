@@ -121,8 +121,9 @@ function numField(label, path, opts = {}) {
     h('input', { type: 'number', step: opts.step ?? 'any', min: opts.min, max: opts.max, value: getPath(path) ?? '',
       placeholder: opts.placeholder ?? '0', 'data-path': path, 'data-num': '1', 'data-rerender': opts.rerender ? '1' : null }));
 }
-function checkField(label, path) {
-  return h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!getPath(path), 'data-path': path }), label);
+function checkField(label, path, opts = {}) {
+  return h('label', { class: 'check' },
+    h('input', { type: 'checkbox', checked: !!getPath(path), 'data-path': path, 'data-rerender': opts.rerender ? '1' : null }), label);
 }
 // Option list entries are [value, label] tuples or full combo option objects.
 const toOption = (o) => (Array.isArray(o) ? { value: o[0], label: o[1] } : o);
@@ -1129,13 +1130,17 @@ function targetSection() {
       { close: 'within 1.5 blocks', far: '3+ blocks away' }[state.target.distance] || '') || 'default', [
       h('div', { class: 'grid' },
         checkField('First hit(s) on mob', 'player.firstHit'),
-        checkField('At full health', 'player.fullHealth'),
-        checkField('Below 20% health', 'player.lowHealth'),
-        checkField('Was just hit', 'player.recentlyHit'),
+        checkField('At full health', 'player.fullHealth', { rerender: true }),
+        checkField('Below 20% health', 'player.lowHealth', { rerender: true }),
+        checkField('Was just hit', 'player.recentlyHit', { rerender: true }),
         checkField('Target has attacked you', 'target.attackedYou'),
         checkField('No other mobs within 15 blocks', 'target.isolated'),
         selectField('Distance to target', 'target.distance',
           [['close', 'Within 1.5 blocks'], ['normal', '1.5–3 blocks'], ['far', 'More than 3 blocks']])),
+      // Possible (absorption, a 0-damage hit) but unusual: a hit normally takes you below full health.
+      state.player.fullHealth && state.player.recentlyHit
+        ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'At full health and just hit rarely apply together: taking a hit usually drops you below full health.')
+        : '',
     ]),
   ], true);
 }
@@ -1196,6 +1201,12 @@ function onFormInput(e) {
     v = clamped;
   }
   setPath(path, v);
+  // You can't be at full health and below 20% health at once: ticking one unticks the other.
+  const opposite = { 'player.fullHealth': 'player.lowHealth', 'player.lowHealth': 'player.fullHealth' }[path];
+  if (opposite && v) {
+    setPath(opposite, false);
+    return rerenderForm();
+  }
   // Hand-edited target stats no longer match the chosen enemy.
   if (state.target.enemy && /^target\.(boss|maxHp|defense)$/.test(path)) {
     state.target.enemy = '';
