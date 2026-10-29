@@ -47,7 +47,7 @@ const defaultState = () => ({
   tuning: {},
   accessoryInputs: { time: 'day' },
   // Simulation screen options.
-  sim: { mode: 'duration', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1 },
+  sim: { mode: 'kill', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1 },
   shards: {},
   pet: { id: '', rarity: 'LEGENDARY', level: 100, item: '' },
   petExtras: { bankCoins: 0, magicFind: 0, goldDigits: 0 },

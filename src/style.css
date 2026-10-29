@@ -706,12 +706,14 @@ button.primary:hover { color: var(--on-accent); }
 
 /* Simulation screen: 80% of the viewport; its content is built in a later step. */
 .modal.sim-screen {
-  width: 80vw; height: 80vh; max-width: none; max-height: none; padding: 18px 22px;
+  width: 80vw; height: 80vh; max-width: none; max-height: none; padding: 10px 22px 18px;
   display: none; flex-direction: column; gap: 14px;
 }
 .modal.sim-screen[open] { display: flex; }
 .sim-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sim-head h2 { margin: 0; }
+/* A compact title bar: a slimmer Close button sets its height. */
+.sim-head button { padding: 4px 12px; }
 /* Never scrolls: the middle row takes what the settings and readouts leave, and the indicator spacing
    shrinks with the window height. */
 .sim-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: clamp(8px, 1.8vh, 14px); }
