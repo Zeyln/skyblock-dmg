@@ -19,6 +19,7 @@ import {
   DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
   ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers, assumedAccessories, WEAPON_ABILITIES,
+  DAGGER_FAMILIES, daggerFamily, daggerPartner,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
   DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
@@ -608,6 +609,11 @@ function weaponSection() {
   }[ult?.effect];
 
   const ability = WEAPON_ABILITIES[weapon?.id];
+  // Blaze Slayer daggers come in pairs: the simulation swaps to a dagger of the other family
+  // (same upgrades as this one) when the Inferno Demonlord's shield needs it.
+  const family = daggerFamily(weapon?.id);
+  const secondOpts = family ? DAGGER_FAMILIES[family === 'fire' ? 'twilight' : 'fire'].ids
+    .map((id) => byId.get(id)).filter(Boolean).map((i) => ({ value: i.id, label: i.name, cls: `tier tier-${i.tier}` })) : [];
   const bonusText = weaponMultipliers(weapon?.id).map((r) => {
     const against = (r.mobs || r.families).join('/');
     return r.perMissingHp ? `up to ×${1 + r.perMissingHp} vs ${against} (scales with missing HP)` : `×${r.mult} vs ${against}`;
@@ -643,6 +649,11 @@ function weaponSection() {
     ability ? h('div', { class: 'chips' }, h('label', {},
       h('input', { type: 'checkbox', checked: state.weapon.abilityOn !== false, 'data-path': 'weapon.abilityOn' }),
       `${ability.name} active (${statText(ability.stats)} vs ${ability.families.join('/')})`)) : '',
+    secondOpts.length ? h('div', { class: 'grid wide' },
+      h('div', { class: 'field', title: 'Swapped to for the other attunements; uses this dagger’s upgrades' },
+        h('span', { class: 'field-label' }, 'Second dagger'),
+        actionSelect(null, secondOpts, secondDaggerId(), (v) => { state.weapon.secondId = v; update(); },
+          { searchable: false, ariaLabel: 'Second dagger' }))) : '',
     h('h3', {}, 'Enchantments'),
     h('div', { class: 'grid wide' },
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Ultimate enchantment'), ultSelect),
@@ -1237,10 +1248,21 @@ function onFormInput(e) {
 }
 
 // ---------- results ----------
+// The second Blaze Slayer dagger: the one picked, if it fits the main dagger, else the same tier of the other family.
+function secondDaggerId() {
+  const partner = daggerPartner(state.weapon.id);
+  if (!partner) return null;
+  const other = DAGGER_FAMILIES[daggerFamily(partner)].ids;
+  return other.includes(state.weapon.secondId) ? state.weapon.secondId : partner;
+}
+
 function buildInput() {
   const piece = (s) => ({ ...s, item: byId.get(s.id) });
+  const second = secondDaggerId();
   return {
     weapon: piece(state.weapon),
+    // Mirrors the main dagger's upgrades (enchants, reforge, stars, books).
+    weapon2: second && byId.get(second) ? { ...piece(state.weapon), id: second, item: byId.get(second) } : null,
     armor: ARMOR_SLOTS.map((s) => piece(state.armor[s])),
     equipment: EQUIP_SLOTS.map((s) => piece(state.equipment[s.key])),
     magicalPower: state.magicalPower,
@@ -1465,10 +1487,15 @@ function renderSim(body) {
   const PHASE_LABELS = {
     shield: 'Hitshield', laser: 'Broken Heart Radiation', glyph: 'Yang Glyph', heads: 'Nukekubi Fixations',
     leap: 'Backstab', web: 'Web of Lies', brood: 'Conjoined Brood',
+    hellion: 'Hellion Shield', split: 'Demonsplit', pillar: 'Fire Pillar', swap: 'Dagger swap',
   };
   const phases = s.phases || [];
   const phaseRows = Object.entries(PHASE_LABELS).filter(([k]) => phases.some((p) => p.kind === k))
-    .map(([k, label]) => ({ k, row: h('li', {}, h('i', { class: 'led', 'aria-hidden': 'true' }), label) }));
+    .map(([k, label]) => {
+      // A phase can name what's happening (e.g. the shield's attunement and the dagger in hand).
+      const detail = h('span', { class: 'sim-bonuses' });
+      return { k, detail, row: h('li', {}, h('i', { class: 'led', 'aria-hidden': 'true' }), h('span', {}, label, detail)) };
+    });
 
   const readout = (k) => { const v = h('b', {}, '—'); return { v, el: h('div', {}, v, h('span', {}, k)) }; };
   const time = readout(s.mode === 'kill' ? 'Time' : `Time (of ${fmt(s.seconds)} s)`);
@@ -1484,8 +1511,7 @@ function renderSim(body) {
         h('ul', { class: 'sim-procs', 'aria-label': 'Actions' }, Object.values(procs).map((p) => p.row)),
         phaseRows.length ? h('ul', { class: 'sim-procs', 'aria-label': 'Boss phases' }, phaseRows.map((p) => p.row)) : ''),
       h('div', { class: 'sim-stage' }, s.error ? h('p', { class: 'hint' }, s.error) : '')),
-    h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, hpRead.el),
-    s.notes?.length ? h('p', { class: 'hint sim-notes' }, s.notes.join(' ')) : '');
+    h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, hpRead.el));
   if (s.error) return;
 
   // Playback: advance the fight clock by real time × speed and replay every event it passes.
@@ -1495,12 +1521,13 @@ function renderSim(body) {
   let last = null;
   // The fight runs to its end (kill or duration), so phases after the last hit still play out.
   const fightEnd = s.killedAt ?? s.seconds;
+  // Damage / s changes only when a hit lands (set in frame); the rest updates every frame.
   const show = () => {
     const end = i >= events.length && clock >= fightEnd;
     const t = Math.min(clock, fightEnd);
     time.v.textContent = `${fmt(t, 1)} s`;
     dmg.v.textContent = fmt(total);
-    dps.v.textContent = end ? fmt(s.dps) : clock >= 1 ? fmt(total / clock) : '—';
+    if (end) dps.v.textContent = fmt(s.dps);
     if (s.maxHp) {
       // Each event carries the current boss's max HP (it changes when the Conjoined Brood takes over).
       const e = i ? events[i - 1] : null;
@@ -1517,12 +1544,18 @@ function renderSim(body) {
     while (i < events.length && events[i].t <= clock) {
       const e = events[i++];
       total = e.total;
+      // Average so far, as of this hit (blank for the first second, when it would swing wildly).
+      dps.v.textContent = e.t >= 1 ? fmt(total / e.t) : '—';
       procs.hit.fire();
       if (e.ferocity) procs.ferocity.fire();
       if (e.swipe) procs.swipe.fire();
       if (e.bonuses.length) procs.bonus.fire(e.bonuses);
     }
-    for (const { k, row } of phaseRows) row.classList.toggle('on', phases.some((p) => p.kind === k && clock >= p.start && clock < p.end));
+    for (const { k, row, detail } of phaseRows) {
+      const now = phases.find((p) => p.kind === k && clock >= p.start && clock < p.end);
+      row.classList.toggle('on', !!now);
+      if (now?.detail && detail.textContent !== now.detail) detail.textContent = now.detail;
+    }
     show();
     if (i >= events.length && clock >= fightEnd) {
       for (const { row } of phaseRows) row.classList.remove('on');

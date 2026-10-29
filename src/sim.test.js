@@ -257,3 +257,58 @@ describe('Tarantula Broodfather phases', () => {
     expect(s.events.at(-1).t).toBeLessThan(180);
   });
 });
+
+describe('Inferno Demonlord phases', () => {
+  const dagger = (id, DAMAGE = 95, extra = {}) => ({ item: { id, name: id, category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE, ...extra } } });
+  const lord = (tier, maxHp) => ({ enemy: `Inferno Demonlord ${tier}`, maxHp, mobs: ['Infernal'], boss: true });
+  const run = (weapon, weapon2, target, opts) =>
+    simulate({ weapon, weapon2, target, bonuses: [{ label: 'x', CRITICAL_CHANCE: -30 }] }, { mode: 'kill', ...opts });
+
+  it('Hellion Shield: the matching dagger every 8 hits, a 150 ms swap between', () => {
+    // Pyrochaos ×2 vs Infernal (Ashen/Auric), Deathripper ×3.5 (Spirit/Crystal); the shield starts on Ashen.
+    const s = run(dagger('HEARTFIRE_DAGGER'), dagger('HEARTMAW_DAGGER'), lord('II', 1e9), { mode: 'duration', duration: 9 });
+    expect(s.events.slice(0, 8).every((e) => e.hit === 200)).toBe(true);
+    expect(s.events[8].hit).toBe(350);
+    const swap = s.phases.find((p) => p.kind === 'swap');
+    expect(swap.end - swap.start).toBeCloseTo(0.15);
+    expect(s.events[8].t).toBeGreaterThanOrEqual(swap.end);
+    expect(s.phases.find((p) => p.kind === 'hellion').detail).toMatch(/^Ashen/);
+  });
+
+  it('one dagger: the wrong attunement and all Ferocity lose 99%', () => {
+    const s = run(dagger('HEARTFIRE_DAGGER', 95, { FEROCITY: 100 }), null, lord('II', 1e9), { mode: 'duration', duration: 9 });
+    expect(s.events[0].hit).toBe(200);
+    expect(s.events[0].damage).toBe(200 + 2); // the Ferocity strike: 1%
+    expect(s.events[8].hit).toBe(2); // Spirit, no Twilight-family dagger
+  });
+
+  it('Demonsplit at 50%: the boss waits at 5M while Quazii and Typhoeus trade shields', () => {
+    const s = run(dagger('HEARTFIRE_DAGGER', 250e3), dagger('HEARTMAW_DAGGER', 250e3), lord('II', 10e6));
+    const split = s.phases.find((p) => p.kind === 'split');
+    expect(split).toBeTruthy();
+    const during = s.events.filter((e) => e.target);
+    expect(during[0].target).toBe('Quazii');
+    expect(during[0].maxHp).toBe(1.75e6);
+    expect(during.some((e) => e.target === 'Typhoeus')).toBe(true);
+    // Back on the boss afterwards, from 5M down to 0.
+    const after = s.events.filter((e) => !e.target && e.t > split.end);
+    expect(after[0].hp).toBeLessThan(5e6);
+    expect(s.killedAt).toBeGreaterThan(split.end);
+  });
+
+  it('Fire Pillars: 500 ms to reach plus 8 hits, every 20 s from 50%', () => {
+    const s = run(dagger('HEARTFIRE_DAGGER', 20e3), dagger('HEARTMAW_DAGGER', 20e3), lord('II', 10e6));
+    const pillars = s.phases.filter((p) => p.kind === 'pillar');
+    expect(pillars.length).toBeGreaterThan(1);
+    expect(pillars[0].end - pillars[0].start).toBeCloseTo(0.5 + 8 * 0.5);
+    expect(pillars[1].start - pillars[0].start).toBeCloseTo(20);
+  });
+
+  it('T1: no shield; Quazii, then Typhoeus', () => {
+    const s = run(dagger('HEARTFIRE_DAGGER', 50e3), null, lord('I', 2.5e6));
+    expect(s.phases.some((p) => p.kind === 'hellion' || p.kind === 'swap')).toBe(false);
+    const names = [...new Set(s.events.filter((e) => e.target).map((e) => e.target))];
+    expect(names).toEqual(['Quazii', 'Typhoeus']);
+    expect(s.killedAt).not.toBeNull();
+  });
+});

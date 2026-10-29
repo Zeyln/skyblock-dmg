@@ -974,6 +974,38 @@ const TIERS = ['I', 'II', 'III', 'IV', 'V'];
 //   Till Death Do Us Part (T5): killing it summons the Conjoined Brood with twice its health, which
 //     only uses the passives (Backstab). T5's natural regeneration has no published rate: left out.
 //   Bat Barrage only stops magic damage. Slayer bosses despawn after despawnS (3 min here, 4 for Voidgloom).
+// Inferno Demonlord, from its wiki page (Oct 2026):
+//   Hellion Shield (T2+): the boss and its demons take 99% less damage unless hit by a Blaze Slayer
+//     dagger attuned like the shield; Ferocity never gets through, enchant damage (Thunderlord, Crimson
+//     swipes) does. Every 8 matching hits the boss's shield moves on: Ashen > Spirit > Auric > Crystal.
+//   Demonsplit: at 1/2 (T1–T2) or 2/3 and 1/3 (T3–T4) the boss splits into Quazii and Typhoeus
+//     (demonHp each); its own HP waits until both are dead. Only one demon can be hurt at a time; on T2+
+//     each has a shield (Quazii Spirit/Crystal, Typhoeus Ashen/Auric) and every 8 matching hits the
+//     damageable demon switches, starting with Quazii on Spirit. On T1, Quazii first, then Typhoeus.
+//   Fire Pillars (T2+, from 1/2 on T2, 2/3 on T3–T4): every 20 s a fireball is held 3.5 s, then lands as a
+//     pillar the player reaches in PILLAR_REACH_S and breaks with 8 hits, no hits on the boss meanwhile.
+//   DDR Apocalypse and the demons' beams and fire trails are dodged at no cost. Despawn time isn't
+//     published: 4 minutes is assumed.
+// Each attunement change is a dagger swap or attunement toggle taking DAGGER_SWAP_S.
+export const HELLION_ORDER = ['ASHEN', 'SPIRIT', 'AURIC', 'CRYSTAL'];
+export const HELLION_SWITCH_HITS = 8;
+export const HELLION_REDUCTION = 0.99;
+export const DAGGER_SWAP_S = 0.15;
+export const PILLAR_REACH_S = 0.5;
+// The two Blaze Slayer dagger families, tier by tier, and the attunements each can take.
+export const DAGGER_FAMILIES = {
+  fire: { ids: ['FIREDUST_DAGGER', 'BURSTFIRE_DAGGER', 'HEARTFIRE_DAGGER'], attunes: ['ASHEN', 'AURIC'] },
+  twilight: { ids: ['MAWDUST_DAGGER', 'BURSTMAW_DAGGER', 'HEARTMAW_DAGGER'], attunes: ['SPIRIT', 'CRYSTAL'] },
+};
+export const daggerFamily = (id) => Object.keys(DAGGER_FAMILIES).find((f) => DAGGER_FAMILIES[f].ids.includes(id)) || null;
+// The other family's dagger of the same tier (the default second dagger).
+export function daggerPartner(id) {
+  const fam = daggerFamily(id);
+  if (!fam) return null;
+  const other = DAGGER_FAMILIES[fam === 'fire' ? 'twilight' : 'fire'];
+  return other.ids[DAGGER_FAMILIES[fam].ids.indexOf(id)];
+}
+
 export const LEAP_AIM_S = 0.2;
 export const WEB_SWAP_S = 1;
 export function bossPhases(enemyName) {
@@ -988,6 +1020,17 @@ export function bossPhases(enemyName) {
       lasers: t === 3 ? { at: [5 / 6, 1 / 2, 1 / 6], vulnerable: 2, immune: 6 } : null,
       glyphs: t >= 1 ? { from: t === 1 ? 1 / 2 : 2 / 3, every: 8, hold: 2 } : null,
       heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
+    };
+  }
+  const demonlord = /^Inferno Demonlord (I|II|III|IV)$/.exec(enemyName || '');
+  if (demonlord) {
+    const t = TIERS.indexOf(demonlord[1]);
+    return {
+      tier: t + 1,
+      despawnS: 240,
+      hellion: t >= 1,
+      split: { at: t <= 1 ? [1 / 2] : [2 / 3, 1 / 3], demonHp: [500e3, 1.75e6, 5e6, 10e6][t] },
+      pillars: t >= 1 ? { from: t === 1 ? 1 / 2 : 2 / 3, every: 20, hold: 3.5, hits: 8 } : null,
     };
   }
   const brood = /^Tarantula Broodfather (I|II|III|IV|V)$/.exec(enemyName || '');

@@ -2,7 +2,8 @@ import { calculate } from './calc.js';
 import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
   FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_SHIELD_S,
-  LEAP_AIM_S, WEB_SWAP_S, bossPhases,
+  LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S, PILLAR_REACH_S,
+  DAGGER_FAMILIES, daggerFamily, bossPhases,
 } from './data/mechanics.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
@@ -57,19 +58,25 @@ export function simulate(input, opts = {}) {
   const dominusEvery = crimson ? DOMINUS_GAIN_S[Math.min(crimson.count, 4)] : 0;
   const swipeMult = crimson ? DOMINUS_SWIPE_MULT[crimson.tier][Math.min(crimson.count, 4) - 2] : 0;
 
+  // Weapons the player swaps between: the main one, and a second Blaze Slayer dagger (input.weapon2).
+  const weapons = [input.weapon, input.weapon2].filter((w) => w?.item);
+  // The target being hit, when it isn't the boss itself (a demon): its max HP before Mayor Derpy and its HP %.
+  let side = null;
   // The single-hit result for a hit's state; most hits share one, so cache them.
   const cache = new Map();
-  const hitResult = (n, stacks) => {
+  const hitResult = (n, stacks, w = 0) => {
     const tenth = n % 10 === 0;
     const fourth = n % 4 === 0;
-    const pct = maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
-    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${broodOn}`;
+    const pct = side ? Math.round(side.pct * 10) / 10 : maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
+    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${broodOn}|${w}|${side?.maxHp}`;
     let r = cache.get(key);
     if (!r) {
+      const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * boss.brood.hpMult } : {};
       r = calculate({
         ...input,
+        weapon: weapons[w] || input.weapon,
         player: { ...player, hitNumber: n },
-        target: { ...input.target, hpPct: pct, ...(broodOn ? { maxHp: input.target.maxHp * boss.brood.hpMult } : {}) },
+        target: { ...input.target, hpPct: pct, ...targetMax },
         accessoryInputs: { ...input.accessoryInputs, tenthHit: tenth },
         setInputs: { ...input.setInputs, crimson: { ...input.setInputs?.crimson, stacks }, tarantula: { ...input.setInputs?.tarantula, fourth } },
       });
@@ -102,6 +109,8 @@ export function simulate(input, opts = {}) {
     ...(boss.shield?.at || []).filter((f) => f < 1).map((f) => ({ f, kind: 'shield' })),
     ...(boss.lasers?.at || []).map((f) => ({ f, kind: 'laser' })),
     ...(boss.webs?.at || []).map((f) => ({ f, kind: 'web' })),
+    ...(boss.split?.at || []).map((f) => ({ f, kind: 'split' })),
+    ...(boss.pillars ? [{ f: boss.pillars.from, kind: 'pillars' }] : []),
     ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
     ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
   ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
@@ -136,8 +145,44 @@ export function simulate(input, opts = {}) {
   // Web of Lies: swap to a shortbow and shoot the egg sacs (Piercing hits them all), no melee meanwhile.
   const sacShot = shortbowTicks(base.totals.ATTACK_SPEED || 0) / TICKS_PER_SECOND;
   const despawnTick = boss?.despawnS ? boss.despawnS * TICKS_PER_SECOND : Infinity;
-  const trigger = (kind, t) => {
+  // Inferno Demonlord: the shield's attunement, the demons once split, fire pillars, and the
+  // attunement the player is holding (a dagger swap or toggle costs DAGGER_SWAP_S).
+  const derpy = input.target?.maxHp ? (base.targetMaxHp || 0) / input.target.maxHp : 1;
+  let attune = 0;
+  let attuneHits = 0;
+  let demons = null; // { list: [{ name, attunes, at, hp }], active }
+  let held = null;
+  let hellion = null; // the open Hellion Shield phase (its detail names the attunement and dagger)
+  const showHellion = (t, detail) => {
+    if (hellion?.detail === detail) return;
+    if (hellion) hellion.end = t;
+    hellion = detail ? { kind: 'hellion', start: t, end: Infinity, detail } : null;
+    if (hellion) phases.push(hellion);
+  };
+  // Demonsplit: one phase segment per damageable demon, so the indicator can name it.
+  let splitPhase = null;
+  const showSplit = (t, name) => {
+    if (splitPhase) splitPhase.end = t;
+    splitPhase = name ? { kind: 'split', start: t, end: Infinity, detail: name } : null;
+    if (splitPhase) phases.push(splitPhase);
+  };
+  let nextPillar = null;
+  const split = (t, f) => {
+    // The boss's own HP stops at the threshold while its demons fight.
+    hp = Math.max(hp, f * maxHp);
+    hpPct = hp / maxHp * 100;
+    const demonHp = boss.split.demonHp;
+    demons = {
+      active: 0,
+      list: [{ name: 'Quazii', attunes: ['SPIRIT', 'CRYSTAL'] }, { name: 'Typhoeus', attunes: ['ASHEN', 'AURIC'] }]
+        .map((d) => ({ ...d, at: 0, hits: 0, hp: demonHp * derpy, maxHp: demonHp * derpy })),
+    };
+    showSplit(t, 'Quazii');
+  };
+  const trigger = (kind, t, f) => {
     if (kind === 'shield') raiseShield(t);
+    else if (kind === 'split') split(t, f);
+    else if (kind === 'pillars') nextPillar = t + boss.pillars.hold;
     else if (kind === 'web') pause('web', t, WEB_SWAP_S + boss.webs.hits * sacShot);
     else if (kind === 'laser') {
       const { vulnerable, immune } = boss.lasers;
@@ -170,6 +215,36 @@ export function simulate(input, opts = {}) {
       }
       nextHead += boss.heads.every;
     }
+    // A fire pillar lands: the player runs to it and breaks it with 8 hits.
+    while (nextPillar !== null && t >= nextPillar) {
+      pause('pillar', nextPillar, PILLAR_REACH_S + boss.pillars.hits * ticksPerHit / TICKS_PER_SECOND);
+      nextPillar += boss.pillars.every;
+    }
+    // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
+    // use the dagger whose family takes its attunement (swapping or toggling first if needed).
+    const demon = demons ? demons.list[demons.active] : null;
+    const need = boss?.hellion ? (demon ? demon.attunes[demon.at] : HELLION_ORDER[attune]) : null;
+    let w = 0;
+    if (need) {
+      const i = weapons.findIndex((x) => DAGGER_FAMILIES[daggerFamily(x.item.id)]?.attunes.includes(need));
+      if (i >= 0) {
+        w = i;
+        if (held !== null && held !== need) {
+          held = need;
+          pause('swap', t, DAGGER_SWAP_S);
+          n--;
+          continue;
+        }
+        held = need;
+      }
+    }
+    const matched = !need || DAGGER_FAMILIES[daggerFamily(weapons[w]?.item.id)]?.attunes.includes(need);
+    if (boss?.hellion) {
+      const att = need ? need[0] + need.slice(1).toLowerCase() : '';
+      showHellion(t, `${att} · ${matched ? weapons[w].item.name : 'no matching dagger'}${demon ? ` · ${demon.name}` : ''}`);
+    }
+    side = demon ? { maxHp: demon.maxHp / derpy, pct: demon.hp / demon.maxHp * 100 } : null;
+
     // (The tolerance keeps float sums like 57.85 + 0.2 from leaving a window open forever.)
     const wait = blocked.find(([s, e]) => t >= s && t < e - 1e-9);
     if (wait) {
@@ -185,7 +260,9 @@ export function simulate(input, opts = {}) {
       stacks = Math.min(DOMINUS_MAX, stacks + 1);
       lastStackTick = tick;
     }
-    const r = hitResult(n, stacks);
+    const r = hitResult(n, stacks, w);
+    // The second dagger may swing at its own speed.
+    const step = w && !bow ? meleeHitTicks(r.totals.ATTACK_SPEED || 0) : ticksPerHit;
     const bonuses = [...r.procs];
     const crit = random() * 100 < r.critChance;
     let dmg = crit ? r.crit : r.nonCrit;
@@ -220,17 +297,52 @@ export function simulate(input, opts = {}) {
     const swipe = swipeReady ? Math.floor(dmg * swipeMult / r.additiveMult) * (out.swipes ? 1 : 2) : 0;
     if (bolt) out.lightning++;
     if (swipe) out.swipes++;
-    out.damage.hits += dmg;
-    out.damage.ferocity += dmg * strikes;
+    // Hellion Shield: an unmatched hit and every Ferocity strike lose 99%; enchant damage
+    // (lightning, swipes) gets through in full.
+    const shieldCut = (x) => Math.floor(x * (1 - HELLION_REDUCTION));
+    const hitDmg = matched ? dmg : shieldCut(dmg);
+    const feroDmg = need ? shieldCut(dmg) : dmg;
+    out.damage.hits += hitDmg;
+    out.damage.ferocity += feroDmg * strikes;
     out.damage.lightning += bolt;
     out.damage.swipes += swipe;
-    const dealt = dmg * (1 + strikes) + bolt + swipe;
+    const dealt = hitDmg + feroDmg * strikes + bolt + swipe;
     total += dealt;
+    if (demon) {
+      demon.hp = Math.max(0, demon.hp - dealt);
+      const other = demons.list[1 - demons.active];
+      if (demon.hp <= 0) {
+        // One demon down: the other is left, then the boss reforms.
+        demons.list[demons.active] = null;
+        if (other) {
+          demons.active = 1 - demons.active;
+          showSplit(t, other.name);
+        } else {
+          demons = null;
+          showSplit(t, null);
+        }
+      } else if (need && matched && ++demon.hits >= HELLION_SWITCH_HITS) {
+        // 8 matching hits: this demon's shield turns, and the other demon becomes the damageable one.
+        demon.hits = 0;
+        demon.at = 1 - demon.at;
+        if (other) {
+          demons.active = 1 - demons.active;
+          showSplit(t, other.name);
+        }
+      }
+      events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name });
+      tick += step;
+      continue;
+    }
     if (maxHp) {
       hp = Math.max(0, hp - dealt);
       hpPct = hp / maxHp * 100;
     }
-    events.push({ t, hit: dmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp });
+    if (need && matched && ++attuneHits >= HELLION_SWITCH_HITS) {
+      attuneHits = 0;
+      attune = (attune + 1) % HELLION_ORDER.length;
+    }
+    events.push({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp });
     if (maxHp && hp <= 0 && boss?.brood && !broodOn) {
       // Till Death Do Us Part: the Conjoined Brood takes over with more health and only its passives.
       broodOn = true;
@@ -243,8 +355,11 @@ export function simulate(input, opts = {}) {
       continue;
     }
     if (maxHp && hp <= 0) { killedAt = t; break; }
-    while (triggers.length && hp <= triggers[0].f * maxHp) trigger(triggers.shift().kind, t);
-    tick += ticksPerHit;
+    while (!demons && triggers.length && hp <= triggers[0].f * maxHp) {
+      const { kind, f } = triggers.shift();
+      trigger(kind, t, f);
+    }
+    tick += step;
   }
 
   const limit = mode === 'kill' ? SIM_MAX_SECONDS : duration;
@@ -261,6 +376,10 @@ export function simulate(input, opts = {}) {
   if (terminator) notes.push(`Hitshields are broken with a Terminator (explosive arrows) in ${TERMINATOR_SHIELD_S.join('–')} s.`);
   if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
   if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.webs ? `; Web of Lies costs ${WEB_SWAP_S} s to swap and re-engage plus ${boss.webs.hits} shortbow shots at the egg sacs` : ''}${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
+  if (boss?.split) {
+    notes.push(`Boss phases: dagger swaps take ${DAGGER_SWAP_S * 1000} ms${boss.pillars ? `; fire pillars take ${PILLAR_REACH_S * 1000} ms to reach plus ${boss.pillars.hits} hits` : ''}; fire pits and demon beams are dodged; despawn after 4 minutes is assumed.`);
+    if (boss.hellion && weapons.length < 2) notes.push('Only one dagger: hits on the wrong attunement lose 99% of their damage.');
+  }
   if (!boss && input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {

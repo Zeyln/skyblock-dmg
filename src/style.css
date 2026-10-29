@@ -740,7 +740,6 @@ button.primary:hover { color: var(--on-accent); }
 .sim-status b { white-space: nowrap; }
 .stat-tiles .sim-hpbar { display: block; height: 4px; margin-top: 6px; background: var(--line); }
 .sim-hpbar i { display: block; height: 100%; background: var(--crit); }
-.sim-notes { margin: 0; }
 @media (max-width: 700px) {
   .sim-main { grid-template-columns: minmax(0, 1fr); }
   .sim-status { grid-template-columns: repeat(2, 1fr); }
