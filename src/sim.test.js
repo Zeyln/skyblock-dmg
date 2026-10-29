@@ -354,3 +354,55 @@ describe('Sven Packmaster phases', () => {
     expect(s.phases).toEqual([]);
   });
 });
+
+describe('Mage Outlaw phases', () => {
+  const outlaw = { enemy: 'Mage Outlaw', maxHp: 70e6, mobs: ['Humanoid', 'Arcane'], boss: true };
+  const run = (DAMAGE, seed = 1, opts = {}, extra = {}) =>
+    simulate(noCrit({ item: sword({ DAMAGE, ...extra }) }, { target: outlaw }), { mode: 'kill', seed, ...opts });
+  const specials = (s) => s.phases.filter((p) => p.kind === 'skulls' || p.kind === 'reflect');
+  // Hits after a phase starts (the hit that set it off lands at its first instant).
+  const hitIn = (s, a, b) => s.events.some((e) => !e.feroOnly && e.t > a + 1e-9 && e.t < b - 1e-9);
+
+  it('a kill always takes 6 special phases, one per 10M lost', () => {
+    for (const seed of [1, 2, 3]) {
+      const s = run(500e3 - 5, seed);
+      expect(s.killedAt).not.toBeNull();
+      expect(specials(s)).toHaveLength(6);
+    }
+  });
+
+  it('Damage Shield: Red Ring 3 s or Lightning Storm 8 s, then 2 s more, no hits', () => {
+    const s = run(500e3 - 5);
+    for (const p of s.phases.filter((x) => x.kind === 'reflect')) {
+      expect(p.end - p.start).toBeCloseTo(p.detail === 'Red Ring' ? 5 : 10);
+      expect(hitIn(s, p.start, p.end)).toBe(false);
+    }
+  });
+
+  it('Summoned Skulls: 1 s to kill one, then the boss for the rest of the 8 s', () => {
+    const seed = [1, 2, 3, 4, 5, 6].find((x) => specials(run(100e3 - 5, x)).some((p) => p.kind === 'skulls'));
+    const s = run(100e3 - 5, seed);
+    const p = s.phases.find((x) => x.kind === 'skulls');
+    expect(p.end - p.start).toBeCloseTo(8);
+    expect(hitIn(s, p.start, p.start + 1)).toBe(false);
+    const after = s.events.filter((e) => !e.feroOnly && e.t >= p.start + 1 && e.t < p.end);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((e) => !e.target)).toBe(true); // all on the boss
+  });
+
+  it('the boss stays hittable after the crystal fades (11 s), until the next threshold', () => {
+    const s = run(20e3 - 5);
+    const crystal = s.phases.find((x) => x.kind === 'crystal');
+    expect(crystal.end - crystal.start).toBeCloseTo(11);
+    expect(s.events.some((e) => !e.target && e.t > crystal.end && e.t < specials(s)[0].start)).toBe(true);
+  });
+
+  it('the boss picks its phases the same way whatever the build', () => {
+    const pick = (s) => specials(s).map((p) => p.detail || p.kind);
+    expect(pick(run(500e3 - 5, 4))).toEqual(pick(run(800e3 - 5, 4, {}, { CRITICAL_CHANCE: 60, FEROCITY: 150 })));
+  });
+
+  it('shows every phase it can have', () => {
+    expect(run(500e3 - 5).phaseKinds).toEqual(['crystal', 'skulls', 'reflect']);
+  });
+});

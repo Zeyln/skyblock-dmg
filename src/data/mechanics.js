@@ -1012,6 +1012,21 @@ export function daggerPartner(id) {
 // second for 5 s, each with 10% of its max health, and stays protected until all of them are dead. The
 // player kills each pup as it arrives. No despawn time is published for it, so none is applied.
 
+// Mage Outlaw (Crimson Isle), from its wiki page and Hypixel forums posts; durations in seconds.
+// Its base phase is the End Crystal: the boss can be hit until it has lost the next tenth-of-70M (every
+// 10M health, so at 6/7, 5/7 … 1/7). The crystal itself fades after 11 s; the boss stays hittable.
+// At each threshold it does one of three things, picked at random:
+//   Summoned Skulls: invulnerable while both skulls live; the player takes 1 s to kill one (no hits on
+//     the boss meanwhile), then hits the boss for the rest of the 8 s.
+//   Damage Shield with a Red Ring (3 s) or a Lightning Storm (8 s), then 2 s more of shield. It reflects
+//     all damage, so the player doesn't hit.
+export const OUTLAW = {
+  steps: 7,
+  crystal: 11,
+  skulls: { kill: 1, window: 8 },
+  shield: { attacks: [['Red Ring', 3], ['Lightning Storm', 8]], linger: 2 },
+};
+
 export const LEAP_AIM_S = 0.2;
 export const WEB_SWAP_S = 1;
 export function bossPhases(enemyName) {
@@ -1028,6 +1043,7 @@ export function bossPhases(enemyName) {
       heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
     };
   }
+  if (enemyName === 'Mage Outlaw') return { outlaw: OUTLAW };
   const sven = /^Sven Packmaster (III|IV)$/.exec(enemyName || '');
   if (sven) return { tier: TIERS.indexOf(sven[1]) + 1, pups: { at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 } };
   const demonlord = /^Inferno Demonlord (I|II|III|IV)$/.exec(enemyName || '');

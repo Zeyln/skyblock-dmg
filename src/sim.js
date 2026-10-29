@@ -122,6 +122,7 @@ export function simulate(input, opts = {}) {
     ...(boss.split?.at || []).map((f) => ({ f, kind: 'split' })),
     ...(boss.pillars ? [{ f: boss.pillars.from, kind: 'pillars' }] : []),
     ...(boss.pups ? [{ f: boss.pups.at, kind: 'pups' }] : []),
+    ...(boss.outlaw ? Array.from({ length: boss.outlaw.steps - 1 }, (_, i) => ({ f: (i + 1) / boss.outlaw.steps, kind: 'outlaw' })) : []),
     ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
     ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
   ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
@@ -206,7 +207,41 @@ export function simulate(input, opts = {}) {
     pups = Array.from({ length: count }, (_, i) => ({ at: t + i * every, hp: maxHp * hpFrac, maxHp: maxHp * hpFrac }));
     showPups(t, `0 of ${count} pups killed`);
   };
+  // Mage Outlaw (data/mechanics.js OUTLAW): crystal phases, with a random special phase each time
+  // it loses another 1/7 of its health. Thresholds passed during a special phase wait for it to end.
+  // The boss's picks use their own random sequence, so they don't change with the player's build.
+  const bossRandom = rng(((opts.seed ?? 1) * 7919 + 13) >>> 0);
+  const outlaw = boss?.outlaw ? { special: null, queued: 0, crystal: null } : null;
+  const startCrystal = (t) => {
+    outlaw.crystal = { kind: 'crystal', start: t, end: t + boss.outlaw.crystal };
+    phases.push(outlaw.crystal);
+  };
+  const startShield = (t) => {
+    const o = boss.outlaw;
+    const [name, length] = o.shield.attacks[Math.floor(bossRandom() * o.shield.attacks.length)];
+    outlaw.special = { end: t + length + o.shield.linger };
+    phases.push({ kind: 'reflect', start: t, end: outlaw.special.end, detail: name });
+    blocked.push([t, outlaw.special.end]); // the shield reflects damage, so the player doesn't hit
+  };
+  const startSpecial = (t) => {
+    const o = boss.outlaw;
+    if (outlaw.crystal) outlaw.crystal.end = Math.min(outlaw.crystal.end, t);
+    outlaw.crystal = null;
+    // Skulls, or a shield with one of its two attacks: three outcomes, equally likely.
+    if (Math.floor(bossRandom() * 3) === 0) {
+      // The boss is invulnerable until the player has killed a skull (o.skulls.kill seconds).
+      outlaw.special = { end: t + o.skulls.window };
+      phases.push({ kind: 'skulls', start: t, end: outlaw.special.end });
+      blocked.push([t, t + o.skulls.kill]);
+      playerBusy.push([t, t + o.skulls.kill]);
+    } else startShield(t);
+  };
+  if (outlaw) startCrystal(0);
   const trigger = (kind, t, f) => {
+    if (kind === 'outlaw') {
+      if (outlaw.special) outlaw.queued++;
+      else startSpecial(t);
+    } else
     if (kind === 'shield') raiseShield(t);
     else if (kind === 'split') split(t, f);
     else if (kind === 'pups') callPups(t, f);
@@ -222,6 +257,15 @@ export function simulate(input, opts = {}) {
 
   for (let tick = 0, n = 1; tick < Math.min(endTick, despawnTick); n++) {
     const t = tick / TICKS_PER_SECOND;
+    // Mage Outlaw: when a special phase ends, the next waiting one starts, else a crystal phase.
+    while (outlaw?.special && t >= outlaw.special.end - 1e-9) {
+      const end = outlaw.special.end;
+      outlaw.special = null;
+      if (outlaw.queued) {
+        outlaw.queued--;
+        startSpecial(end);
+      } else startCrystal(end);
+    }
     while (nextLeap !== null && t >= nextLeap) {
       pause('leap', nextLeap, LEAP_AIM_S);
       nextLeap += boss.leaps.every;
@@ -447,5 +491,12 @@ export function simulate(input, opts = {}) {
     mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp: maxHp * Math.min(100, Math.max(0, opts.enemyHpPct ?? 100)) / 100,
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
     hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes,
+    // Every phase this boss can have, whether or not this fight got to it (for the indicator).
+    phaseKinds: !boss ? [] : [
+      boss.shield && 'shield', boss.lasers && 'laser', boss.glyphs && 'glyph', boss.heads && 'heads',
+      boss.leaps && 'leap', boss.webs && 'web', boss.brood && 'brood',
+      boss.hellion && 'hellion', boss.split && 'split', boss.pillars && 'pillar', boss.hellion && weapons.length > 1 && 'swap',
+      boss.pups && 'pups', ...(boss.outlaw ? ['crystal', 'skulls', 'reflect'] : []),
+    ].filter(Boolean),
   };
 }
