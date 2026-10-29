@@ -2,7 +2,7 @@ import {
   BASE_PLAYER_STATS, ENCHANTS, weaponMultipliers, SWORD_REFORGES, BOW_REFORGES, ARMOR_REFORGES,
   RARITIES, GEMS, gemValue, PROGRESSION_ITEMS, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
-  ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
+  ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, WEAPON_ABILITIES, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
@@ -179,6 +179,11 @@ export function calculate(input) {
   sources.push({ label: 'Base player stats', stats: { ...BASE_PLAYER_STATS } });
 
   if (weapon.item) sources.push(...pieceSources(weapon, 'weapon', input, statPct));
+  // Weapon ability kept active through the fight (Soulcry), unless switched off.
+  const ability = WEAPON_ABILITIES[weapon.item?.id];
+  if (ability && weapon.abilityOn !== false && ability.families.some((f) => target.families.includes(f))) {
+    sources.push({ label: `↳ ${ability.name}`, stats: { ...ability.stats } });
+  }
   // Base (starred) stats per worn piece, for set bonuses that scale piece stats (Adaptive).
   const pieceBase = new Map();
   for (const [kind, list] of [['armor', input.armor], ['equipment', input.equipment]]) {

@@ -446,6 +446,14 @@ export const TARGET_FAMILIES = ['Enderman', 'Wolf', 'Sea creature', 'Dragon'];
 
 const vs = (mobs, mult) => ({ mobs, mult });
 const vsFamily = (families, mult) => ({ families, mult });
+// Right-click abilities players keep up for a whole fight, shown as an on/off toggle (on by default).
+// Soulcry: +Ferocity against Endermen for 4 s, with a 4 s cooldown, so it can always be active (wiki, Oct 2026).
+export const WEAPON_ABILITIES = {
+  VOIDEDGE_KATANA: { name: 'Soulcry', stats: { FEROCITY: 200 }, families: ['Enderman'] },
+  VORPAL_KATANA: { name: 'Soulcry', stats: { FEROCITY: 300 }, families: ['Enderman'] },
+  ATOMSPLIT_KATANA: { name: 'Soulcry', stats: { FEROCITY: 400 }, families: ['Enderman'] },
+};
+
 export const WEAPON_MULTIPLIERS = {
   // Endermen
   END_SWORD: [vsFamily(['Enderman'], 2)],
@@ -935,3 +943,38 @@ export const DOMINUS_MAX = 10;
 // (Basic..Infernal) and pieces worn (2 / 3 / 4) is below. The wiki gives the timing only as "upon
 // reaching 10 stacks": the simulation swipes on each stack gain while at 10.
 export const DOMINUS_SWIPE_MULT = [[0.5, 1, 1.5], [0.625, 1.25, 1.875], [0.75, 1.5, 2.25], [0.875, 1.75, 2.625], [1, 2, 3]];
+
+// ---------- Boss phases (sim.js) ----------
+// Voidgloom Seraph, from its wiki page (Oct 2026). HP thresholds are fractions of max HP.
+//   Hitshield: on spawn and at 2/3 and 1/3; takes no damage until it has taken this many hits. Ferocity
+//     strikes are counted as hits (the wiki only says Ferocity is weakened while the shield is down).
+//   Ferocity is divided by 4 while the shield is down.
+//   Broken Heart Radiation (T4): at 5/6, 1/2 and 1/6 the boss sits for 8 s, immune for the last 6.
+//   Yang Glyphs: from 1/2 (T2) or 2/3 (T3+); held 2 s then thrown, one every 8 s (an older wiki
+//     figure; T3+ are said to throw "more often"), never while the shield is up. Breaking one takes
+//     the player GLYPH_BREAK_S, with no hits meanwhile.
+//   Nukekubi Fixations (T3+): from 1/3, a head every 6 s (older wiki figure; max 6 alive). A head goes
+//     after being looked at for HEAD_LOOK_S, with no hits meanwhile. The player lets heads pile up to
+//     HEAD_BATCH, then looks at them all.
+// The player's own pauses (glyphs, heads) happen one after another, never at the same time.
+//   Hitshield on T4, or any tier above TERMINATOR_MP: the player swaps to a Terminator with explosive
+//     arrows and breaks it in TERMINATOR_SHIELD_S, with no melee hits meanwhile.
+export const GLYPH_BREAK_S = [0.5, 0.75];
+export const TERMINATOR_MP = 900;
+export const TERMINATOR_SHIELD_S = [2.5, 3];
+export const HEAD_LOOK_S = 0.5;
+export const HEAD_BATCH = 2;
+const SERAPH_TIERS = ['I', 'II', 'III', 'IV'];
+export function bossPhases(enemyName) {
+  const m = /^Voidgloom Seraph (I|II|III|IV)$/.exec(enemyName || '');
+  if (!m) return null;
+  const t = SERAPH_TIERS.indexOf(m[1]);
+  return {
+    tier: t + 1,
+    feroDivisor: 4,
+    shield: { hits: [15, 30, 60, 100][t], at: [1, 2 / 3, 1 / 3] },
+    lasers: t === 3 ? { at: [5 / 6, 1 / 2, 1 / 6], vulnerable: 2, immune: 6 } : null,
+    glyphs: t >= 1 ? { from: t === 1 ? 1 / 2 : 2 / 3, every: 8, hold: 2 } : null,
+    heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
+  };
+}

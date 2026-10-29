@@ -1,7 +1,7 @@
 import { calculate } from './calc.js';
 import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
-  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT,
+  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_SHIELD_S, bossPhases,
 } from './data/mechanics.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
@@ -91,7 +91,79 @@ export function simulate(input, opts = {}) {
   let lastStackTick = -Infinity;
   let killedAt = null;
 
-  for (let tick = 0, n = 1; tick < endTick; tick += ticksPerHit, n++) {
+  // Boss phases (data/mechanics.js bossPhases): each is { kind, start, end } in seconds, for the
+  // indicator. HP thresholds trigger in order as the boss's HP falls past them.
+  const boss = maxHp ? bossPhases(input.target?.enemy) : null;
+  const phases = [];
+  const startFrac = hp / maxHp;
+  const triggers = boss ? [
+    ...boss.shield.at.filter((f) => f < 1).map((f) => ({ f, kind: 'shield' })),
+    ...(boss.lasers?.at || []).map((f) => ({ f, kind: 'laser' })),
+    ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
+    ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
+  ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
+  // Hitshields: hit down with the weapon, or (T4, or above TERMINATOR_MP) shot down with a Terminator
+  // in a fixed time, during which there are no melee hits and the player does nothing else.
+  const terminator = boss && (boss.tier === 4 || (input.magicalPower || 0) > TERMINATOR_MP);
+  let shield = null;
+  let shieldUntil = 0;
+  const raiseShield = (t) => {
+    if (!terminator) { shield = { left: boss.shield.hits, start: t }; return; }
+    const [lo, hi] = TERMINATOR_SHIELD_S;
+    shieldUntil = t + lo + random() * (hi - lo);
+    phases.push({ kind: 'shield', start: t, end: shieldUntil });
+    blocked.push([t, shieldUntil]);
+    playerBusy.push([t, shieldUntil]);
+  };
+  let nextGlyph = boss?.glyphs && startFrac <= boss.glyphs.from ? boss.glyphs.hold : null;
+  const blocked = []; // [start, end) windows with no hits: laser immunity, glyphs, heads
+  // The player's own pauses go one after another: a new one starts once any earlier one is over.
+  const playerBusy = [];
+  const pause = (kind, start, length, phaseStart = start) => {
+    for (const [s, e] of playerBusy) if (start >= s && start < e) start = e;
+    playerBusy.push([start, start + length]);
+    blocked.push([start, start + length]);
+    phases.push({ kind, start: phaseStart, end: start + length });
+  };
+  let nextHead = null;
+  let heads = []; // spawn times of heads still alive
+  if (boss && startFrac >= 1) raiseShield(0);
+  const trigger = (kind, t) => {
+    if (kind === 'shield') raiseShield(t);
+    else if (kind === 'laser') {
+      const { vulnerable, immune } = boss.lasers;
+      phases.push({ kind: 'laser', start: t, end: t + vulnerable + immune });
+      blocked.push([t + vulnerable, t + vulnerable + immune]);
+    } else if (kind === 'glyphs') nextGlyph = t + boss.glyphs.hold;
+    else if (kind === 'heads') nextHead = t;
+  };
+
+  for (let tick = 0, n = 1; tick < endTick; n++) {
+    const t = tick / TICKS_PER_SECOND;
+    // A glyph lands: the player stops to break it (never while the shield is up; it waits for the shield).
+    // (A glyph due while a Terminator-broken shield is up waits for it, plus the hold.)
+    if (nextGlyph !== null && nextGlyph < shieldUntil && t >= nextGlyph) nextGlyph = shieldUntil + boss.glyphs.hold;
+    if (nextGlyph !== null && t >= nextGlyph && !shield) {
+      pause('glyph', nextGlyph, GLYPH_BREAK_S[0] + random() * (GLYPH_BREAK_S[1] - GLYPH_BREAK_S[0]));
+      nextGlyph += boss.glyphs.every;
+    }
+    // Heads spawn every few seconds; once HEAD_BATCH are up, the player looks at each in turn.
+    // The indicator stays lit from the first head of a batch until the last one is gone.
+    while (nextHead !== null && t >= nextHead) {
+      heads.push(nextHead);
+      if (heads.length >= HEAD_BATCH) {
+        pause('heads', nextHead, heads.length * HEAD_LOOK_S, heads[0]);
+        heads = [];
+      }
+      nextHead += boss.heads.every;
+    }
+    const wait = blocked.find(([s, e]) => t >= s && t < e);
+    if (wait) {
+      tick = Math.ceil(wait[1] * TICKS_PER_SECOND);
+      n--;
+      continue;
+    }
+
     // Dominus: a melee hit gains a stack if the last one was long enough ago; at 10 stacks it swipes.
     let swipeReady = false;
     if (dominusEvery && tick - lastStackTick >= dominusEvery * TICKS_PER_SECOND) {
@@ -108,16 +180,30 @@ export function simulate(input, opts = {}) {
       bonuses.push('Fabled');
     }
     // Ferocity: each full 100 is an extra strike, the rest a chance at one more; strikes repeat the hit.
-    const fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
+    let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
+    if (boss && !shield) fero /= boss.feroDivisor;
     const strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
-    const bolt = r.lightningPct && n % 3 === 0 ? Math.floor(dmg * r.lightningPct / 100) : 0;
-    if (bolt) bonuses.push('Lightning');
-    // Swipe: the hit × Swipe Strength / its Additive Multiplier, doubled the first time it hits the enemy.
-    const swipe = swipeReady ? Math.floor(dmg * swipeMult / r.additiveMult) * (out.swipes ? 1 : 2) : 0;
 
     out.hits++;
     if (crit) out.crits++;
     out.ferocity += strikes;
+    if (shield) {
+      // The shield takes hits, not damage.
+      shield.left -= 1 + strikes;
+      if (shield.left <= 0) {
+        phases.push({ kind: 'shield', start: shield.start, end: t });
+        shield = null;
+        if (nextGlyph !== null && nextGlyph < t) nextGlyph = t + boss.glyphs.hold;
+      }
+      events.push({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true });
+      tick += ticksPerHit;
+      continue;
+    }
+
+    const bolt = r.lightningPct && n % 3 === 0 ? Math.floor(dmg * r.lightningPct / 100) : 0;
+    if (bolt) bonuses.push('Lightning');
+    // Swipe: the hit × Swipe Strength / its Additive Multiplier, doubled the first time it hits the enemy.
+    const swipe = swipeReady ? Math.floor(dmg * swipeMult / r.additiveMult) * (out.swipes ? 1 : 2) : 0;
     if (bolt) out.lightning++;
     if (swipe) out.swipes++;
     out.damage.hits += dmg;
@@ -130,21 +216,27 @@ export function simulate(input, opts = {}) {
       hp = Math.max(0, hp - dealt);
       hpPct = hp / maxHp * 100;
     }
-    const t = tick / TICKS_PER_SECOND;
     events.push({ t, hit: dmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp });
     if (maxHp && hp <= 0) { killedAt = t; break; }
+    while (triggers.length && hp <= triggers[0].f * maxHp) trigger(triggers.shift().kind, t);
+    tick += ticksPerHit;
   }
 
   const seconds = killedAt ?? (mode === 'kill' ? SIM_MAX_SECONDS : duration);
+  if (shield) phases.push({ kind: 'shield', start: shield.start, end: seconds });
+  if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
+  for (const p of phases) p.end = Math.min(p.end, seconds);
   if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
-  if (input.target?.boss) notes.push('Boss damage caps are not modelled.');
+  if (terminator) notes.push(`Hitshields are broken with a Terminator (explosive arrows) in ${TERMINATOR_SHIELD_S.join('–')} s.`);
+  if (boss) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
+  else if (input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {
     mode, seconds, killedAt, maxHp, startHp: maxHp * Math.min(100, Math.max(0, opts.enemyHpPct ?? 100)) / 100,
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
-    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, notes,
+    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes,
   };
 }

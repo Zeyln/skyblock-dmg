@@ -18,7 +18,7 @@ import {
   ARMOR_REFORGES, RARITIES, GEMS, GEM_QUALITIES, SLOT_ACCEPTS, GEM_FILL_PRIORITY, gemValue,
   DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
-  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers, assumedAccessories,
+  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers, assumedAccessories, WEAPON_ABILITIES,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
   DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
@@ -392,7 +392,7 @@ function anvilControls(kind, path) {
 }
 
 const STAT_SHORT = { STRENGTH: 'Str', CRITICAL_DAMAGE: 'Crit Dmg', CRITICAL_CHANCE: 'Crit Chance', DAMAGE: 'Dmg',
-  INTELLIGENCE: 'Int', HEALTH: 'Health', DEFENSE: 'Def', TRUE_DEFENSE: 'True Def' };
+  INTELLIGENCE: 'Int', HEALTH: 'Health', DEFENSE: 'Def', TRUE_DEFENSE: 'True Def', FEROCITY: 'Ferocity', ATTACK_SPEED: 'Atk Speed' };
 const statText = (stats) => Object.entries(stats).filter(([, v]) => v)
   .map(([k, v]) => `${v > 0 ? '+' : ''}${fmt(v, 2)} ${STAT_SHORT[k] || k}`).join(', ');
 
@@ -607,6 +607,7 @@ function weaponSection() {
     soulEater: () => numField("Last killed mob's damage", 'player.soulEaterMobDamage', { min: 0 }),
   }[ult?.effect];
 
+  const ability = WEAPON_ABILITIES[weapon?.id];
   const bonusText = weaponMultipliers(weapon?.id).map((r) => {
     const against = (r.mobs || r.families).join('/');
     return r.perMissingHp ? `up to ×${1 + r.perMissingHp} vs ${against} (scales with missing HP)` : `×${r.mult} vs ${against}`;
@@ -639,6 +640,9 @@ function weaponSection() {
   return panel('weapon', 'Weapon', summary, [
     slotBlock('weapon', 'weapon', items.weapons, 'Item', null, true),
     bonusText ? h('p', { class: 'weapon-bonus' }, `Weapon bonus: ${bonusText}`) : '',
+    ability ? h('div', { class: 'chips' }, h('label', {},
+      h('input', { type: 'checkbox', checked: state.weapon.abilityOn !== false, 'data-path': 'weapon.abilityOn' }),
+      `${ability.name} active (${statText(ability.stats)} vs ${ability.families.join('/')})`)) : '',
     h('h3', {}, 'Enchantments'),
     h('div', { class: 'grid wide' },
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Ultimate enchantment'), ultSelect),
@@ -1457,6 +1461,11 @@ function renderSim(body) {
   const procs = {
     hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
   };
+  // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
+  const PHASE_LABELS = { shield: 'Hitshield', laser: 'Broken Heart Radiation', glyph: 'Yang Glyph', heads: 'Nukekubi Fixations' };
+  const phases = s.phases || [];
+  const phaseRows = Object.entries(PHASE_LABELS).filter(([k]) => phases.some((p) => p.kind === k))
+    .map(([k, label]) => ({ k, row: h('li', {}, h('i', { class: 'led', 'aria-hidden': 'true' }), label) }));
 
   const readout = (k) => { const v = h('b', {}, '—'); return { v, el: h('div', {}, v, h('span', {}, k)) }; };
   const time = readout(s.mode === 'kill' ? 'Time' : `Time (of ${fmt(s.seconds)} s)`);
@@ -1468,7 +1477,9 @@ function renderSim(body) {
 
   body.replaceChildren(settings,
     h('div', { class: 'sim-main' },
-      h('ul', { class: 'sim-procs', 'aria-label': 'Actions' }, Object.values(procs).map((p) => p.row)),
+      h('div', { class: 'sim-indicators' },
+        h('ul', { class: 'sim-procs', 'aria-label': 'Actions' }, Object.values(procs).map((p) => p.row)),
+        phaseRows.length ? h('ul', { class: 'sim-procs', 'aria-label': 'Boss phases' }, phaseRows.map((p) => p.row)) : ''),
       h('div', { class: 'sim-stage' }, s.error ? h('p', { class: 'hint' }, s.error) : '')),
     h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, hpRead.el),
     s.notes?.length ? h('p', { class: 'hint sim-notes' }, s.notes.join(' ')) : '');
@@ -1479,9 +1490,11 @@ function renderSim(body) {
   let clock = 0;
   let total = 0;
   let last = null;
+  // The fight runs to its end (kill or duration), so phases after the last hit still play out.
+  const fightEnd = s.killedAt ?? s.seconds;
   const show = () => {
-    const end = i >= events.length;
-    const t = end ? s.seconds : clock;
+    const end = i >= events.length && clock >= fightEnd;
+    const t = Math.min(clock, fightEnd);
     time.v.textContent = `${fmt(t, 1)} s`;
     dmg.v.textContent = fmt(total);
     dps.v.textContent = end ? fmt(s.dps) : clock >= 1 ? fmt(total / clock) : '—';
@@ -1504,8 +1517,10 @@ function renderSim(body) {
       if (e.swipe) procs.swipe.fire();
       if (e.bonuses.length) procs.bonus.fire(e.bonuses);
     }
+    for (const { k, row } of phaseRows) row.classList.toggle('on', phases.some((p) => p.kind === k && clock >= p.start && clock < p.end));
     show();
-    if (i >= events.length) {
+    if (i >= events.length && clock >= fightEnd) {
+      for (const { row } of phaseRows) row.classList.remove('on');
       stopSimPlayback();
       playBtn.disabled = true;
       playBtn.textContent = s.killedAt !== null ? 'Killed' : 'Done';

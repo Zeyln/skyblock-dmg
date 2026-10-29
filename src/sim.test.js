@@ -128,3 +128,78 @@ describe('playback events', () => {
     expect(more.swipe).toBe(Math.floor(400 * 3 / 4));
   });
 });
+
+describe('weapon abilities', () => {
+  const vorpal = { id: 'VORPAL_KATANA', name: 'Vorpal Katana', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95 } };
+  const enderman = { mobs: ['Ender'], families: ['Enderman'] };
+
+  it('Soulcry adds Ferocity against Endermen, on unless switched off', () => {
+    expect(calculate({ weapon: { item: vorpal }, target: enderman }).totals.FEROCITY).toBe(300);
+    expect(calculate({ weapon: { item: vorpal, abilityOn: false }, target: enderman }).totals.FEROCITY || 0).toBe(0);
+    expect(calculate({ weapon: { item: vorpal }, target: { mobs: ['Ender'] } }).totals.FEROCITY || 0).toBe(0); // an Endermite
+  });
+
+  it('the simulation gets 3 extra strikes per hit from Vorpal Soulcry', () => {
+    const s = simulate(noCrit({ item: vorpal }, { target: enderman }), { duration: 1 });
+    expect(s.ferocity).toBe(2 * 3);
+  });
+});
+
+describe('Voidgloom Seraph phases', () => {
+  const seraph = (tier, maxHp) => ({ enemy: `Voidgloom Seraph ${tier}`, maxHp, mobs: ['Ender'], families: ['Enderman'], boss: true });
+
+  it('Hitshield takes hits, Ferocity counts toward it and is divided by 4 once it is down', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 400 }) }, { target: seraph('I', 1e9) }), { duration: 5 });
+    // 15-hit shield, 5 hits per swing (1 + 4 Ferocity strikes): 3 swings.
+    expect(s.events.slice(0, 3).every((e) => e.shielded && e.damage === 0)).toBe(true);
+    expect(s.events[3].shielded).toBeUndefined();
+    expect(s.events[3].ferocity).toBe(1); // 400 / 4
+    expect(s.phases[0]).toMatchObject({ kind: 'shield', start: 0, end: 1 });
+  });
+
+  it('T4: shields, laser immunity, glyph breaks and heads all play out', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 3.5e6 - 5 }) }, { target: seraph('IV', 210e6) }), { mode: 'kill', seed: 2 });
+    const kinds = (k) => s.phases.filter((p) => p.kind === k);
+    expect(kinds('shield')).toHaveLength(3);
+    expect(kinds('laser')).toHaveLength(3);
+    // Heads: one every 6 s; when the second is up the player spends 1 s looking at both, no hits.
+    const batches = kinds('heads').filter((p) => p.end - p.start >= 7);
+    expect(batches.length).toBeGreaterThan(1);
+    for (const [i, p] of batches.entries()) {
+      expect(s.events.some((e) => e.t >= p.end - 1 && e.t < p.end)).toBe(false);
+      if (i) expect(p.start - batches[i - 1].start).toBe(12);
+    }
+    expect(kinds('glyph').length).toBeGreaterThan(0);
+    // T4 shields are shot down with a Terminator in 2.5–3 s, with no melee hits meanwhile.
+    for (const p of kinds('shield')) {
+      expect(p.end - p.start).toBeGreaterThanOrEqual(2.5);
+      expect(p.end - p.start).toBeLessThanOrEqual(3);
+    }
+    expect(s.events[0].t).toBeGreaterThanOrEqual(kinds('shield')[0].end);
+    expect(s.events.some((e) => e.shielded)).toBe(false);
+    // No hits while immune (after the first 2 s of each laser) or while breaking a glyph.
+    const hitIn = (a, b) => s.events.some((e) => e.t >= a && e.t < b);
+    for (const p of kinds('laser')) expect(hitIn(p.start + 2, p.end)).toBe(false);
+    for (const p of kinds('shield')) expect(hitIn(p.start + 1e-9, p.end)).toBe(false);
+    for (const p of kinds('glyph')) {
+      expect(p.end - p.start).toBeGreaterThanOrEqual(0.5);
+      expect(p.end - p.start).toBeLessThanOrEqual(0.75);
+      expect(hitIn(p.start, p.end)).toBe(false);
+    }
+    expect(s.killedAt).toBeGreaterThan(3 * 2.5 + 3 * 6);
+  });
+
+  it('below T4, a Terminator breaks shields only above 900 Magical Power', () => {
+    const run = (magicalPower) => simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { target: seraph('III', 1e9), magicalPower }), { duration: 40 });
+    expect(run(900).events.slice(0, 60).every((e) => e.shielded)).toBe(true); // 60 hits by hand
+    const fast = run(901);
+    expect(fast.events.some((e) => e.shielded)).toBe(false);
+    expect(fast.phases[0].end).toBeLessThanOrEqual(3);
+  });
+
+  it('other enemies have no phases', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 400 }) }, { target: { maxHp: 1e9 } }), { duration: 1 });
+    expect(s.phases).toEqual([]);
+    expect(s.events[0].ferocity).toBe(4);
+  });
+});
