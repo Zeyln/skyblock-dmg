@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { calculate, itemStats, rarityIndex, reforgeTable } from './calc.js';
 import {
   powerMultiplier, combatWarriorBonus, POWERS, greedBonus, enchantConflict, floorLabel, catacombsBoost,
-  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats,
+  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats, ENCHANTS, ultimatesFor,
 } from './data/mechanics.js';
 import { petNumbers, cleanLore } from './data/pets.js';
 import { parseFormatting, stripFormatting, hasFormatting, MC_COLORS } from './mctext.js';
@@ -184,6 +184,29 @@ describe('reforges and gemstones', () => {
   it('renowned gives +1% stats per piece', () => {
     const r = calculate({ armor: [armor('LEGENDARY', { reforge: 'renowned' }), armor('LEGENDARY', { reforge: 'renowned' })] });
     expect(r.strength).toBeCloseTo(20 * 1.02);
+  });
+});
+
+describe('enchants per weapon type', () => {
+  const rod = (stats) => ({ id: 'TEST_ROD', name: 'Rod', category: 'FISHING_ROD', tier: 'LEGENDARY', stats });
+
+  it('fishing rods ignore sword enchants but take Spiked Hook', () => {
+    const r = calculate({ weapon: { item: rod({ DAMAGE: 95 }), enchants: { sharpness: 7, spiked_hook: 7 } } });
+    expect(r.additiveMult).toBeCloseTo(1.35); // Spiked Hook VII only
+    const s = calculate({ weapon: { item: sword({ DAMAGE: 95 }), enchants: { sharpness: 7, spiked_hook: 7 } } });
+    expect(s.additiveMult).toBeCloseTo(1.5); // Sharpness VII only
+  });
+
+  it('offers only the ultimates a weapon type can take', () => {
+    const names = (item) => ultimatesFor(item).map((u) => u.id);
+    expect(names(rod({}))).toEqual(expect.arrayContaining(['soul_eater', 'fatal_tempo', 'inferno', 'ultimate_wise', 'flash']));
+    expect(names(rod({}))).not.toContain('one_for_all');
+    expect(names(sword({}))).not.toContain('flash');
+  });
+
+  it('Woodsplitter is for axes only', () => {
+    const ws = ENCHANTS.find((e) => e.id === 'woodsplitter');
+    expect(ws.on).toEqual(['AXE']);
   });
 });
 

@@ -355,30 +355,43 @@ export const ENEMIES = [
 //       'stat'      -> adds a flat stat
 // mobs: only applies when the target has one of these types
 // bow / melee: restrict to weapon class
+// Weapon categories (the item's Hypixel category) an enchant can go on, from each enchant's wiki
+// page (checked Oct 2026). Items without a category count as swords.
+const MELEE = ['SWORD', 'LONGSWORD', 'GAUNTLET'];
+const BOW = ['BOW'];
+const ROD = ['FISHING_ROD'];
+const AXE = ['AXE'];
+const ALL_WEAPONS = [...MELEE, ...BOW, ...ROD, ...AXE, 'WAND'];
+export const weaponCategory = (item) => item?.category || 'SWORD';
+// Whether an enchant (or ultimate) can be applied to this weapon.
+export const enchantFits = (ench, item) =>
+  (ench.items ? ench.items.includes(item?.id) : true) && (ench.on || ALL_WEAPONS).includes(weaponCategory(item));
+
 export const ENCHANTS = [
-  { id: 'sharpness', name: 'Sharpness', melee: true, values: [5, 10, 15, 20, 30, 40, 50] },
-  { id: 'smite', name: 'Smite', melee: true, mobs: ['Skeletal', 'Undead', 'Wither'], values: [5, 10, 15, 20, 30, 40, 50] },
-  { id: 'bane', name: 'Bane of Arthropods', melee: true, mobs: ['Arthropod'], values: [5, 10, 15, 20, 30, 40, 50] },
-  { id: 'ender_slayer', name: 'Ender Slayer', melee: true, mobs: ['Ender'], values: [5, 10, 15, 20, 30, 40, 50] },
-  { id: 'cubism', name: 'Cubism', mobs: ['Cubic'], values: [5, 10, 15, 20, 30, 40] },
-  { id: 'impaling', name: 'Impaling', mobs: ['Aquatic'], values: [5, 10, 15, 20, 30] },
-  { id: 'smoldering', name: 'Smoldering', mobs: ['Infernal'], values: [5, 10, 15, 20, 30] },
-  { id: 'gravity', name: 'Gravity', mobs: ['Airborne'], values: [5, 10, 15, 20, 30, 40] },
-  { id: 'woodsplitter', name: 'Woodsplitter', mobs: ['Woodland'], values: [5, 10, 15, 20, 30, 40] },
-  { id: 'pyroclasm', name: 'Pyroclasm', mobs: ['Magmatic'], values: [10, 20, 30, 40, 60, 80] },
-  { id: 'power', name: 'Power', bow: true, values: [8, 16, 24, 32, 40, 50, 65] },
-  { id: 'first_strike', name: 'First Strike', melee: true, firstHit: true, values: [25, 50, 75, 100, 125] },
-  { id: 'triple_strike', name: 'Triple-Strike', melee: true, firstThree: true, values: [10, 20, 30, 40, 50] },
+  { id: 'sharpness', name: 'Sharpness', on: MELEE, values: [5, 10, 15, 20, 30, 40, 50] },
+  { id: 'smite', name: 'Smite', on: MELEE, mobs: ['Skeletal', 'Undead', 'Wither'], values: [5, 10, 15, 20, 30, 40, 50] },
+  { id: 'bane', name: 'Bane of Arthropods', on: MELEE, mobs: ['Arthropod'], values: [5, 10, 15, 20, 30, 40, 50] },
+  { id: 'ender_slayer', name: 'Ender Slayer', on: MELEE, mobs: ['Ender'], values: [5, 10, 15, 20, 30, 40, 50] },
+  { id: 'cubism', name: 'Cubism', on: [...MELEE, ...BOW], mobs: ['Cubic'], values: [5, 10, 15, 20, 30, 40] },
+  { id: 'impaling', name: 'Impaling', on: [...MELEE, ...BOW, ...ROD], mobs: ['Aquatic'], values: [5, 10, 15, 20, 30] },
+  { id: 'smoldering', name: 'Smoldering', on: ALL_WEAPONS, mobs: ['Infernal'], values: [5, 10, 15, 20, 30] },
+  { id: 'gravity', name: 'Gravity', on: [...MELEE, ...BOW], mobs: ['Airborne'], values: [5, 10, 15, 20, 30, 40] },
+  { id: 'woodsplitter', name: 'Woodsplitter', on: AXE, mobs: ['Woodland'], values: [5, 10, 15, 20, 30, 40] },
+  { id: 'pyroclasm', name: 'Pyroclasm', on: [...MELEE, ...ROD], mobs: ['Magmatic'], values: [10, 20, 30, 40, 60, 80] },
+  { id: 'spiked_hook', name: 'Spiked Hook', on: ROD, values: [5, 10, 15, 20, 25, 30, 35] },
+  { id: 'power', name: 'Power', on: BOW, values: [8, 16, 24, 32, 40, 50, 65] },
+  { id: 'first_strike', name: 'First Strike', on: MELEE, firstHit: true, values: [25, 50, 75, 100, 125] },
+  { id: 'triple_strike', name: 'Triple-Strike', on: MELEE, firstThree: true, values: [10, 20, 30, 40, 50] },
   // Per 1% of target HP lost / remaining
-  { id: 'execute', name: 'Execute', melee: true, perMissingHp: true, values: [0.2, 0.4, 0.6, 0.8, 1, 1.25] },
-  { id: 'prosecute', name: 'Prosecute', melee: true, perCurrentHp: true, values: [0.1, 0.2, 0.3, 0.4, 0.7, 1] },
+  { id: 'execute', name: 'Execute', on: MELEE, perMissingHp: true, values: [0.2, 0.4, 0.6, 0.8, 1, 1.25] },
+  { id: 'prosecute', name: 'Prosecute', on: MELEE, perCurrentHp: true, values: [0.1, 0.2, 0.3, 0.4, 0.7, 1] },
   // Per 1% of target max HP above the player's, capped
-  { id: 'giant_killer', name: 'Giant Killer', melee: true, giantKiller: true,
+  { id: 'giant_killer', name: 'Giant Killer', on: MELEE, giantKiller: true,
     values: [0.1, 0.2, 0.3, 0.4, 0.6, 0.9, 1.2], caps: [5, 10, 15, 20, 30, 45, 65] },
   // Per 100 target defense, capped
-  { id: 'titan_killer', name: 'Titan Killer', melee: true, titanKiller: true,
+  { id: 'titan_killer', name: 'Titan Killer', on: MELEE, titanKiller: true,
     values: [2, 4, 6, 8, 12, 16, 20], caps: [6, 12, 18, 24, 40, 60, 80] },
-  { id: 'critical', name: 'Critical', melee: true, stat: 'CRITICAL_DAMAGE', values: [10, 20, 30, 40, 50, 70, 100] },
+  { id: 'critical', name: 'Critical', on: MELEE, stat: 'CRITICAL_DAMAGE', values: [10, 20, 30, 40, 50, 70, 100] },
 ];
 
 // Pairs that can't be on the same weapon (applying one replaces the other in-game).
@@ -400,24 +413,25 @@ export function enchantConflict(id, enchants) {
 // 'soulEater' (×mob damage as Strength on the next crit), 'chimera' (% of pet stats),
 // 'baseDamage' (% of the weapon's base Damage), or none (no effect on a single hit).
 export const ULTIMATE_ENCHANTS = [
-  { id: 'one_for_all', name: 'One For All', melee: true, values: [500], effect: 'additive', exclusive: true,
+  { id: 'one_for_all', name: 'One For All', on: ['SWORD', 'LONGSWORD'], values: [500], effect: 'additive', exclusive: true,
     note: 'Removes all other enchantments' },
-  { id: 'soul_eater', name: 'Soul Eater', values: [2, 4, 6, 8, 10], effect: 'soulEater', cap: 5000,
+  { id: 'soul_eater', name: 'Soul Eater', on: ALL_WEAPONS, values: [2, 4, 6, 8, 10], effect: 'soulEater', cap: 5000,
     note: 'Strength = level × last killed mob\'s damage, on the next crit (max 5,000 outside dungeons)' },
-  { id: 'swarm', name: 'Swarm', melee: true, values: [2, 4, 6, 8, 10], effect: 'perEnemy', max: 10 },
-  { id: 'combo', name: 'Combo', melee: true, values: [1, 2, 3, 4, 5], caps: [2, 4, 6, 8, 10], effect: 'perKill' },
-  { id: 'chimera', name: 'Chimera', melee: true, values: [20, 40, 60, 80, 100], effect: 'chimera' },
-  { id: 'ultimate_jerry', name: 'Ultimate Jerry', melee: true, items: ['ASPECT_OF_THE_JERRY'],
+  { id: 'swarm', name: 'Swarm', on: ['SWORD', 'LONGSWORD', ...BOW], values: [2, 4, 6, 8, 10], effect: 'perEnemy', max: 10 },
+  { id: 'combo', name: 'Combo', on: MELEE, values: [1, 2, 3, 4, 5], caps: [2, 4, 6, 8, 10], effect: 'perKill' },
+  { id: 'chimera', name: 'Chimera', on: MELEE, values: [20, 40, 60, 80, 100], effect: 'chimera' },
+  { id: 'ultimate_jerry', name: 'Ultimate Jerry', items: ['ASPECT_OF_THE_JERRY'],
     values: [1000, 2000, 3000, 4000, 5000], effect: 'baseDamage' },
-  { id: 'fatal_tempo', name: 'Fatal Tempo', values: [10, 20, 30, 40, 50], note: 'Ferocity only — no single-hit effect' },
-  { id: 'inferno', name: 'Inferno', values: [125, 150, 175, 200, 225], note: 'Every 10th hit — no single-hit effect' },
-  { id: 'ultimate_wise', name: 'Ultimate Wise', melee: true, values: [10, 20, 30, 40, 50], note: 'Mana cost only' },
-  { id: 'duplex', name: 'Duplex', bow: true, values: [4, 8, 12, 16, 20], note: 'Second arrow — no effect on the first arrow' },
-  { id: 'rend', name: 'Rend', bow: true, values: [5, 10, 15, 20, 25], note: 'Left-click ability — no single-hit effect' },
+  { id: 'fatal_tempo', name: 'Fatal Tempo', on: [...MELEE, ...BOW, ...AXE, ...ROD], values: [10, 20, 30, 40, 50], note: 'Ferocity only — no single-hit effect' },
+  { id: 'inferno', name: 'Inferno', on: [...MELEE, ...ROD, ...AXE, ...BOW], values: [125, 150, 175, 200, 225], note: 'Every 10th hit — no single-hit effect' },
+  { id: 'ultimate_wise', name: 'Ultimate Wise', on: ALL_WEAPONS, values: [10, 20, 30, 40, 50], note: 'Mana cost only' },
+  { id: 'duplex', name: 'Duplex', on: BOW, values: [4, 8, 12, 16, 20], note: 'Second arrow — no effect on the first arrow' },
+  { id: 'rend', name: 'Rend', on: BOW, values: [5, 10, 15, 20, 25], note: 'Left-click ability — no single-hit effect' },
+  { id: 'flash', name: 'Flash', on: ROD, values: [1, 2, 3, 4, 5], note: 'Fishing only — no single-hit effect' },
 ];
 
-export function ultimatesFor(item, bow) {
-  return ULTIMATE_ENCHANTS.filter((u) => !(u.melee && bow) && !(u.bow && !bow) && (!u.items || u.items.includes(item?.id)));
+export function ultimatesFor(item) {
+  return ULTIMATE_ENCHANTS.filter((u) => enchantFits(u, item));
 }
 
 // ---------- Weapon bonuses vs specific enemies (multiplicative) ----------

@@ -17,7 +17,7 @@ import {
   ARMOR_REFORGES, RARITIES, GEMS, GEM_QUALITIES, SLOT_ACCEPTS, GEM_FILL_PRIORITY, gemValue,
   DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
-  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, TARGET_FAMILIES, weaponMultipliers,
+  ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
   DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
@@ -577,8 +577,9 @@ function fillAllGems(quality) {
 function weaponSection() {
   const weapon = byId.get(state.weapon.id);
   const bow = isBow(weapon);
-  const enchants = ENCHANTS.filter((e) => !(e.bow && !bow) && !(e.melee && bow && !e.stat));
-  const ults = ultimatesFor(weapon, bow);
+  // Only the enchants this weapon's type can take (e.g. fishing rods: Spiked Hook, Impaling…).
+  const enchants = ENCHANTS.filter((e) => enchantFits(e, weapon));
+  const ults = ultimatesFor(weapon);
   const ult = ults.find((u) => u.id === state.weapon.ultimate?.id);
   const oneForAll = !!ult?.exclusive;
 
