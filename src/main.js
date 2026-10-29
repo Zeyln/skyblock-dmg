@@ -618,6 +618,7 @@ function weaponSection() {
   const secondOpts = family ? DAGGER_FAMILIES[family === 'fire' ? 'twilight' : 'fire'].ids
     .map((id) => byId.get(id)).filter(Boolean).map((i) => ({ value: i.id, label: i.name, cls: `tier tier-${i.tier}` })) : [];
   const bonusText = weaponMultipliers(weapon?.id).map((r) => {
+    if (r.label) return `×${r.mult} ${r.label}`;
     const against = (r.mobs || r.families).join('/');
     return r.perMissingHp ? `up to ×${1 + r.perMissingHp} vs ${against} (scales with missing HP)` : `×${r.mult} vs ${against}`;
   }).join(', ');
@@ -1167,7 +1168,9 @@ function targetSection() {
         chipField('Below 20% health', 'player.lowHealth', { rerender: true }),
         chipField('Was just hit', 'player.recentlyHit', { rerender: true }),
         chipField('Target has attacked you', 'target.attackedYou'),
-        chipField('No other mobs within 15 blocks', 'target.isolated')),
+        chipField('No other mobs within 15 blocks', 'target.isolated'),
+        // Only for weapons with an in-water bonus (Prismarine Blade).
+        weaponMultipliers(state.weapon.id).some((r) => r.when === 'inWater') ? chipField('In water', 'player.inWater') : ''),
       h('div', { class: 'grid', style: 'margin-top:12px' },
         selectField('Distance to target', 'target.distance',
           [['close', 'Within 1.5 blocks'], ['normal', '1.5–3 blocks'], ['far', 'More than 3 blocks']])),

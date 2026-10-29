@@ -698,3 +698,15 @@ describe('helmet abilities and reforge pools', () => {
     expect(keys('equipment', belt)).not.toContain('bloodsoaked'); // cloaks only
   });
 });
+
+describe('weapon bonuses without a target type', () => {
+  const w = (id, category = 'SWORD') => ({ item: { id, name: id, category, tier: 'RARE', stats: { DAMAGE: 95 } } });
+  it('Savanna Bow and Sulphur Bow double all damage', () => {
+    expect(calculate({ weapon: w('SAVANA_BOW', 'BOW') }).multMult).toBe(2);
+    expect(calculate({ weapon: w('SULPHUR_BOW', 'BOW') }).multMult).toBe(2);
+  });
+  it('Prismarine Blade triples damage in water only', () => {
+    expect(calculate({ weapon: w('PRISMARINE_BLADE') }).multMult).toBe(1);
+    expect(calculate({ weapon: w('PRISMARINE_BLADE'), player: { inWater: true } }).multMult).toBe(3);
+  });
+});

@@ -407,11 +407,12 @@ export function calculate(input) {
 
   // Weapon bonus vs specific enemies
   for (const rule of weaponMultipliers(weapon.item?.id)) {
-    const against = rule.mobs || rule.families;
-    const hit = rule.mobs ? hitsMob(rule.mobs, target) : rule.families.some((f) => target.families.includes(f));
+    const hit = rule.always || (rule.when === 'inWater' ? !!player.inWater
+      : rule.mobs ? hitsMob(rule.mobs, target) : rule.families.some((f) => target.families.includes(f)));
     if (!hit) continue;
     const value = rule.perMissingHp ? 1 + rule.perMissingHp * (100 - target.hpPct) / 100 : rule.mult;
-    if (value !== 1) multiplicative.push({ label: `${weapon.item.name} vs ${against.join('/')}`, value });
+    const what = rule.label || `vs ${(rule.mobs || rule.families).join('/')}`;
+    if (value !== 1) multiplicative.push({ label: `${weapon.item.name} ${what}`, value });
   }
 
   // Other user-entered sources (pets, potions, gems, talismans, abilities…)

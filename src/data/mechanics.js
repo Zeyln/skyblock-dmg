@@ -454,7 +454,16 @@ export const WEAPON_ABILITIES = {
   ATOMSPLIT_KATANA: { name: 'Soulcry', stats: { FEROCITY: 400 }, families: ['Enderman'] },
 };
 
+// Rules that don't depend on the target: always on, or while the player is in water.
+const always = (mult, label) => ({ always: true, mult, label });
+const inWater = (mult) => ({ when: 'inWater', mult, label: 'in water' });
 export const WEAPON_MULTIPLIERS = {
+  // Unconditional (Sulphur Bow assumes Sulphur in the inventory or quiver)
+  SAVANA_BOW: [always(2, 'all damage')],
+  SULPHUR_BOW: [always(2, 'with Sulphur')],
+  PRISMARINE_BLADE: [inWater(3)],
+  // Not added: Shaman Sword (the wiki lists its +100% vs wolves as ×1 since Aug 2026, a possible bug),
+  // Daedalus Blade (no published value per Mythological Bestiary tier).
   // Endermen
   END_SWORD: [vsFamily(['Enderman'], 2)],
   VOIDWALKER_KATANA: [vsFamily(['Enderman'], 2.5)],
