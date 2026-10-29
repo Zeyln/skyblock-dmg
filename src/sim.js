@@ -357,6 +357,11 @@ export function simulate(input, opts = {}) {
     const bonuses = [...r.procs];
     const crit = random() * 100 < r.critChance;
     let dmg = crit ? r.crit : r.nonCrit;
+    // Overload: a crit can be a Mega Critical Hit.
+    if (crit && r.megaChance && random() * 100 < r.megaChance) {
+      dmg = r.megaCrit;
+      bonuses.push('Overload');
+    }
     if (crit && fabled) {
       dmg = Math.floor(dmg * (1 + random() * FABLED_MAX_BONUS));
       bonuses.push('Fabled');

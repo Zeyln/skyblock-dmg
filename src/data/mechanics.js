@@ -380,6 +380,8 @@ export const ENCHANTS = [
   { id: 'pyroclasm', name: 'Pyroclasm', on: [...MELEE, ...ROD], mobs: ['Magmatic'], values: [10, 20, 30, 40, 60, 80] },
   { id: 'spiked_hook', name: 'Spiked Hook', on: ROD, values: [5, 10, 15, 20, 25, 30, 35] },
   { id: 'power', name: 'Power', on: BOW, values: [8, 16, 24, 32, 40, 50, 65] },
+  // Crit Chance over 100% gives (CC - 100)% odds of a Mega Critical Hit for +k% (multiplicative) on a crit.
+  { id: 'overload', name: 'Overload', on: BOW, overload: true, values: [10, 20, 30, 40, 50] },
   { id: 'first_strike', name: 'First Strike', on: MELEE, firstHit: true, values: [25, 50, 75, 100, 125] },
   { id: 'triple_strike', name: 'Triple-Strike', on: MELEE, firstThree: true, values: [10, 20, 30, 40, 50] },
   // Per 1% of target HP lost / remaining

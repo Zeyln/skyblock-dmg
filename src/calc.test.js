@@ -800,3 +800,18 @@ describe('accessory and class sources', () => {
     expect(run(20, 20)).toBeCloseTo(1 + 0.4); // level 20 cap: 10% × 4
   });
 });
+
+describe('Overload', () => {
+  const bowW = (CRITICAL_CHANCE) => ({ item: { id: 'TEST_BOW', name: 'Bow', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 95, CRITICAL_CHANCE } }, enchants: { overload: 5 } });
+  it('Crit Chance over 100% is the chance of a +50% Mega Critical Hit', () => {
+    const r = calculate({ weapon: bowW(120) }); // 30 base + 120 = 150 Crit Chance: 50% mega
+    expect(r.megaChance).toBe(50);
+    expect(r.megaCrit).toBe(Math.floor(r.crit * 1.5));
+    expect(r.expected).toBeCloseTo(r.crit + (r.megaCrit - r.crit) * 0.5, 0);
+    expect(calculate({ weapon: bowW(50) }).megaChance).toBe(0);
+  });
+  it('only bows take it', () => {
+    const sword = { item: { id: 'TEST_SWORD', name: 'S', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95, CRITICAL_CHANCE: 200 } }, enchants: { overload: 5 } };
+    expect(calculate({ weapon: sword }).megaChance).toBe(0);
+  });
+});

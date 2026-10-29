@@ -261,6 +261,7 @@ export function calculate(input) {
   const applied = {};
   const hitNumber = player.hitNumber || 0;
   let lightningPct = 0;
+  let overloadPct = 0;
   for (const ench of ENCHANTS) {
     const lvl = weapon.enchants?.[ench.id] || 0;
     if (!lvl || oneForAll) continue;
@@ -277,6 +278,7 @@ export function calculate(input) {
     const label = `${ench.name} ${roman(lvl)}`;
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
     if (ench.sim === 'lightning') { lightningPct = v; continue; } // every 3rd hit, simulation only
+    if (ench.overload) { overloadPct = v; continue; } // applied to crits below
     if (!hitsMob(ench.mobs, target)) continue;
     // The simulation passes the hit's number; a single hit uses the First hit(s) setting.
     if (ench.firstHit && !(hitNumber ? hitNumber === 1 : player.firstHit)) continue;
@@ -455,6 +457,8 @@ export function calculate(input) {
   const strength = totals.STRENGTH || 0;
   const critDamage = totals.CRITICAL_DAMAGE || 0;
   const critChance = Math.min(100, Math.max(0, totals.CRITICAL_CHANCE || 0));
+  // Overload: Crit Chance beyond 100% is the chance of a Mega Critical Hit (all of it at 200%).
+  const megaChance = overloadPct ? Math.min(100, Math.max(0, (totals.CRITICAL_CHANCE || 0) - 100)) : 0;
 
   const baseDamage = 5 + damage;
   const strengthMult = 1 + strength / 100;
@@ -472,7 +476,8 @@ export function calculate(input) {
   // Soul Eater's Strength only applies to the next crit.
   const critInitial = baseDamage * (1 + (strength + soulEaterStr) / 100);
   const crit = Math.floor(critInitial * additiveMult * multMult * critMult * defenseMult);
-  const expected = nonCrit + (crit - nonCrit) * critChance / 100;
+  const megaCrit = overloadPct ? Math.floor(critInitial * additiveMult * multMult * critMult * (1 + overloadPct / 100) * defenseMult) : crit;
+  const expected = nonCrit + ((crit - nonCrit) + (megaCrit - crit) * megaChance / 100) * critChance / 100;
   if (soulEaterStr) notes.push(`Soul Eater adds +${Math.round(soulEaterStr)} Strength to the crit hit only.`);
 
   return {
@@ -484,7 +489,7 @@ export function calculate(input) {
     cataBoost: catacombsBoost(input.catacombsLevel),
     baseDamage, strengthMult, initial, additiveMult, multMult, critMult, defense, defenseMult,
     targetMaxHp: target.maxHp, lightningPct, speed,
-    nonCrit, crit, expected,
+    nonCrit, crit, expected, megaCrit, megaChance, overloadPct,
   };
 }
 
