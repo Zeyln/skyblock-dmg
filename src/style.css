@@ -56,6 +56,8 @@
   --mc-0: #1d2233; --mc-1: #1f2fa8; --mc-2: #1e7a2e; --mc-3: #127c8a; --mc-4: #a8201a; --mc-5: #8c35b8;
   --mc-6: #c28a00; --mc-7: #7b7f8c; --mc-8: #5c6070; --mc-9: #3d55e0; --mc-a: #1e8f3a; --mc-b: #1a9fb0;
   --mc-c: #d33a3a; --mc-d: #c4309f; --mc-e: #b39200; --mc-f: #7b7f8c;
+  /* Simulation graph phase bands: categorical slots 1–4 (dataviz reference palette, validated). */
+  --phase-1: #2a78d6; --phase-2: #eb6834; --phase-3: #1baf7a; --phase-4: #eda100;
   --radius: 16px;
   --radius-sm: 10px;
   font-family: var(--font-mc);
@@ -108,6 +110,7 @@
   --mc-0: #8a8f9e; --mc-1: #6070ff; --mc-2: #2fbf3f; --mc-3: #22b8b8; --mc-4: #d9473c; --mc-5: #c050c0;
   --mc-6: #ffaa00; --mc-7: #aaaaaa; --mc-8: #7a7e8a; --mc-9: #7b7bff; --mc-a: #55ff55; --mc-b: #55ffff;
   --mc-c: #ff5555; --mc-d: #ff55ff; --mc-e: #ffff55; --mc-f: #f2f2f2;
+  --phase-1: #3987e5; --phase-2: #d95926; --phase-3: #199e70; --phase-4: #c98500;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -740,7 +743,68 @@ button.primary:hover { color: var(--on-accent); }
 .sim-bonuses span { white-space: nowrap; }
 .sim-bonuses span.on { color: var(--crit); }
 .sim-bonuses .sep { margin: 0 6px; }
-.sim-stage { min-width: 0; display: flex; align-items: center; justify-content: center; }
+.sim-stage { min-width: 0; min-height: 0; display: flex; align-items: stretch; justify-content: center; }
+
+/* Middle of the simulation: the target with its damage numbers, and the damage graph beside it. */
+.sim-visual { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(140px, 0.7fr) minmax(0, 1.6fr); gap: 16px; align-items: center; }
+.sim-target { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.sim-dummy-wrap { position: relative; width: 100%; max-width: 220px; aspect-ratio: 1; }
+.sim-dummy { position: absolute; inset: 25% 20% 0; width: 60%; height: 75%; }
+.sim-dummy .head, .sim-dummy .body, .sim-dummy .arm { fill: var(--muted); }
+.sim-dummy .post, .sim-dummy .base { fill: var(--faint); }
+.sim-dummy .mark { fill: var(--crit); }
+/* Enemy picture (wiki art): a full-body render fitted into the area, or a head sprite scaled up with crisp pixels. */
+.sim-face { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center bottom; user-select: none; }
+.sim-face.head { inset: 18%; width: 64%; height: 64%; image-rendering: pixelated; }
+.sim-face[hidden] { display: none; }
+/* Nametag above the mob, as in-game: a dark translucent plate with the bright in-game colours (both themes). */
+.sim-nametag {
+  --tag-a: #55ff55; --tag-b: #55ffff; --tag-c: #ff5555; --tag-d: #ff55ff; --tag-e: #ffff55; --tag-f: #ffffff;
+  --tag-5: #aa00aa; --tag-7: #aaaaaa;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 8px;
+  max-width: 100%; background: rgba(0, 0, 0, .45); font-size: 13px; line-height: 1.2; text-align: center;
+}
+.sim-nametag:empty { display: none; }
+.sim-nametag .b { font-weight: 700; }
+/* In-game symbols (❤ ☠ ✧) as pixel icons: the pixel font has no such glyphs. Coloured by the text colour. */
+.ico { display: inline-block; width: .7em; height: .7em; vertical-align: -.05em; background: currentColor; -webkit-mask: var(--ico) center / 100% 100% no-repeat; mask: var(--ico) center / 100% 100% no-repeat; }
+.ico-heart { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M1 0h1v1H1zM2 0h1v1H2zM4 0h1v1H4zM5 0h1v1H5zM0 1h1v1H0zM1 1h1v1H1zM2 1h1v1H2zM3 1h1v1H3zM4 1h1v1H4zM5 1h1v1H5zM6 1h1v1H6zM0 2h1v1H0zM1 2h1v1H1zM2 2h1v1H2zM3 2h1v1H3zM4 2h1v1H4zM5 2h1v1H5zM6 2h1v1H6zM0 3h1v1H0zM1 3h1v1H1zM2 3h1v1H2zM3 3h1v1H3zM4 3h1v1H4zM5 3h1v1H5zM6 3h1v1H6zM1 4h1v1H1zM2 4h1v1H2zM3 4h1v1H3zM4 4h1v1H4zM5 4h1v1H5zM2 5h1v1H2zM3 5h1v1H3zM4 5h1v1H4zM3 6h1v1H3z'/%3E%3C/svg%3E"); }
+.ico-skull { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M1 0h1v1H1zM2 0h1v1H2zM3 0h1v1H3zM4 0h1v1H4zM5 0h1v1H5zM0 1h1v1H0zM1 1h1v1H1zM2 1h1v1H2zM3 1h1v1H3zM4 1h1v1H4zM5 1h1v1H5zM6 1h1v1H6zM0 2h1v1H0zM3 2h1v1H3zM6 2h1v1H6zM0 3h1v1H0zM3 3h1v1H3zM6 3h1v1H6zM0 4h1v1H0zM1 4h1v1H1zM2 4h1v1H2zM4 4h1v1H4zM5 4h1v1H5zM6 4h1v1H6zM1 5h1v1H1zM2 5h1v1H2zM3 5h1v1H3zM4 5h1v1H4zM5 5h1v1H5zM1 6h1v1H1zM3 6h1v1H3zM5 6h1v1H5z'/%3E%3C/svg%3E"); }
+.ico-crit { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M3 0h1v1H3zM3 1h1v1H3zM2 2h1v1H2zM4 2h1v1H4zM0 3h1v1H0zM1 3h1v1H1zM5 3h1v1H5zM6 3h1v1H6zM2 4h1v1H2zM4 4h1v1H4zM3 5h1v1H3zM3 6h1v1H3z'/%3E%3C/svg%3E"); }
+
+/* Damage numbers float up and fade (no fade when motion is reduced: they just appear and go). */
+.sim-pops { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.sim-pop { position: absolute; transform: translateX(-50%); font-size: 13px; white-space: nowrap; animation: sim-pop .9s ease-out forwards; }
+.sim-pop.hit { color: var(--mc-7); }
+.sim-pop.ferocity { color: var(--mc-c); }
+.sim-pop.lightning { color: var(--mc-e); }
+.sim-pop.swipe { color: var(--mc-6); }
+@keyframes sim-pop { 0% { opacity: 0; translate: 0 6px; } 15% { opacity: 1; translate: 0 0; } 100% { opacity: 0; translate: 0 -34px; } }
+@media (prefers-reduced-motion: reduce) { .sim-pop { animation: sim-pop-still .9s steps(1) forwards; } @keyframes sim-pop-still { to { opacity: 0; } } }
+
+.sim-graph { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sim-graph-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; font-size: 12px; color: var(--muted); }
+.sim-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sim-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.sim-legend i { width: 10px; height: 10px; }
+.sim-chart-wrap { position: relative; }
+.sim-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.sim-chart .grid { stroke: var(--line); stroke-width: 1; }
+.sim-chart .axis { fill: var(--faint); font-size: 10px; font-family: inherit; }
+.sim-chart .damage { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.sim-chart .cursor { stroke: var(--text); stroke-width: 1; opacity: .5; }
+.sim-chart .band { opacity: .22; }
+.band-1 { fill: var(--phase-1); background: var(--phase-1); }
+.band-2 { fill: var(--phase-2); background: var(--phase-2); }
+.band-3 { fill: var(--phase-3); background: var(--phase-3); }
+.band-4 { fill: var(--phase-4); background: var(--phase-4); }
+.sim-tip {
+  position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; z-index: 2;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; font-size: 11px; white-space: nowrap;
+  background: var(--glass-strong); border: var(--px) solid var(--line); color: var(--text);
+}
+.sim-tip[hidden] { display: none; }
+@media (max-width: 700px) { .sim-visual { grid-template-columns: minmax(0, 1fr); } }
 .sim-status b { white-space: nowrap; }
 .stat-tiles .sim-hpbar { display: block; height: 4px; margin-top: 6px; background: var(--line); }
 .sim-hpbar i { display: block; height: 100%; background: var(--crit); }
@@ -751,6 +815,11 @@ button.primary:hover { color: var(--on-accent); }
 
 /* Fake loading spinner: eight pixel squares in a ring, lit one after another (steps, not easing). */
 .sim-loader { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 18px; color: var(--muted); }
+/* Loading bar: a thin bar filling over the load time, with the figure being compiled and the % above it, left-aligned. */
+.sim-progress { width: 100%; margin-top: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.sim-progress span { font-size: 12px; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sim-progress-bar { width: 100%; height: 4px; background: var(--inset); }
+.sim-progress-bar i { display: block; height: 100%; background: var(--accent); }
 .sim-spinner { position: relative; width: 30px; height: 30px; }
 .sim-spinner i {
   position: absolute; width: 8px; height: 8px; background: var(--accent); opacity: .2;

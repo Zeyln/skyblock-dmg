@@ -7,6 +7,8 @@ import { initLogo } from './logo.js';
 import { parseFormatting } from './mctext.js';
 import { detectSets, evaluateSets } from './data/sets.js';
 import { simulate } from './sim.js';
+import { createSimGraphic } from './simGraphic.js';
+import { mobSprite } from './data/mobSprites.js';
 import {
   PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
 } from './data/pets.js';
@@ -1412,20 +1414,65 @@ async function startSimulation() {
 }
 
 // A short fake load when the screen opens, for suspense.
-const SIM_LOAD_MS = 1400;
+const SIM_LOAD_MS = 2400;
+// Then a pause on the ready screen before the fight starts (first open only, not on restarts).
+const SIM_START_DELAY_MS = 1000;
+// How long each figure stays on the loading bar.
+const SIM_LOAD_LINE_MS = 70;
+
+// The figures the loading bar runs through: the build's stats, sources and multipliers.
+function simLoadLines() {
+  const r = calculate(buildInput());
+  return [
+    `Damage ${fmt(r.damage, 1)}`, `Strength ${fmt(r.strength, 1)}`, `Crit Damage ${fmt(r.critDamage, 1)}`,
+    `Crit Chance ${fmt(r.critChance, 1)}`, `Additive ×${fmt(r.additiveMult, 3)}`, `Multiplicative ×${fmt(r.multMult, 3)}`,
+    ...r.sources.filter((src) => src.stats.STRENGTH || src.stats.CRITICAL_DAMAGE).slice(0, 12)
+      .map((src) => `${src.label.replace(/^↳ /, '')}`),
+    `Non-crit ${fmt(r.nonCrit)}`, `Critical hit ${fmt(r.crit)}`,
+  ];
+}
+
+// Start loading the enemy's picture, and those of anything it can turn into mid-fight, while the
+// loading screen runs (the pictures are large; only these few are ever fetched).
+function preloadEnemyPictures() {
+  const enemy = state.target.enemy || '';
+  const also = /^Inferno Demonlord/.test(enemy) ? ['Quazii', 'Typhoeus']
+    : /^Sven Packmaster/.test(enemy) ? ['Sven Pup']
+      : enemy === 'Tarantula Broodfather V' ? ['Conjoined Brood'] : [];
+  for (const name of [enemy, ...also]) {
+    const pic = mobSprite(name);
+    if (pic) new Image().src = pic.src;
+  }
+}
 
 function openSimScreen() {
+  preloadEnemyPictures();
+  const lines = simLoadLines();
+  const fill = h('i', { style: 'width:0%' });
+  const label = h('span', {}, '');
   const body = h('div', { class: 'sim-body' },
     h('div', { class: 'sim-loader', role: 'status' },
-      h('div', { class: 'sim-spinner', 'aria-hidden': 'true' }, Array.from({ length: 8 }, (_, i) => h('i', { style: `--i:${i}` }))),
-      h('span', {}, 'Preparing simulation…')));
+      h('div', { class: 'sim-spinner', 'aria-hidden': 'true' }, Array.from({ length: 8 }, (_, i) => h('i', { style: `--i:${i}` })))),
+    // Along the bottom of the window, full width.
+    h('div', { class: 'sim-progress' }, label, h('div', { class: 'sim-progress-bar' }, fill)));
+  // The bar fills over the load time while its text runs through the figures being compiled.
+  const loadStart = performance.now();
+  const progress = setInterval(() => {
+    const elapsed = performance.now() - loadStart;
+    const pct = Math.min(100, Math.floor(elapsed / SIM_LOAD_MS * 100));
+    fill.style.width = `${pct}%`;
+    label.textContent = `${pct}% — ${lines[Math.floor(elapsed / SIM_LOAD_LINE_MS) % lines.length]}`;
+  }, 30);
   const dialog = h('dialog', { class: 'modal glass sim-screen', 'aria-labelledby': 'sim-title' },
     h('div', { class: 'sim-head' },
       h('h2', { id: 'sim-title' }, 'Simulation'),
       h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Close')),
     body);
-  setTimeout(() => { if (dialog.open) renderSim(body); }, SIM_LOAD_MS);
-  dialog.addEventListener('close', () => { stopSimPlayback(); dialog.remove(); });
+  setTimeout(() => {
+    clearInterval(progress);
+    if (dialog.open) renderSim(body, SIM_START_DELAY_MS);
+  }, SIM_LOAD_MS);
+  dialog.addEventListener('close', () => { clearInterval(progress); stopSimPlayback(); dialog.remove(); });
   // Clicking the backdrop closes it, as with the confirmation modal.
   dialog.addEventListener('click', (e) => {
     if (e.target !== dialog) return;
@@ -1444,7 +1491,7 @@ let simTimer = 0;
 const SIM_FLASH_MS = 100;
 const stopSimPlayback = () => { clearInterval(simTimer); simTimer = 0; };
 
-function renderSim(body) {
+function renderSim(body, startDelay = 0) {
   stopSimPlayback();
   const o = state.sim;
   const restart = () => renderSim(body);
@@ -1527,6 +1574,8 @@ function renderSim(body) {
   const dps = readout('Damage / s');
   // The chosen enemy's name (the health bar says the rest), or whatever is being hit instead (a demon, a pup, the Brood).
   const enemyName = state.target.enemy || 'Enemy';
+  // The middle: damage numbers off a target, and the damage graph (simGraphic.js).
+  const graphic = s.error ? null : createSimGraphic(s, { labels: PHASE_LABELS, name: enemyName, boss: !!state.target.boss });
   const hpRead = readout(enemyName);
   const hpBar = h('i', { style: 'width:100%' });
   if (s.maxHp) hpRead.el.append(h('span', { class: 'sim-hpbar' }, hpBar)); // a span: tile divs get tile styling
@@ -1536,7 +1585,7 @@ function renderSim(body) {
       h('div', { class: 'sim-indicators' },
         h('ul', { class: 'sim-procs', 'aria-label': 'Actions' }, Object.values(procs).map((p) => p.row)),
         phaseRows.length ? h('ul', { class: 'sim-procs', 'aria-label': 'Boss phases' }, phaseRows.map((p) => p.row)) : ''),
-      h('div', { class: 'sim-stage' }, s.error ? h('p', { class: 'hint' }, s.error) : '')),
+      h('div', { class: 'sim-stage' }, s.error ? h('p', { class: 'hint' }, s.error) : graphic.el)),
     h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, hpRead.el));
   if (s.error) return;
 
@@ -1565,8 +1614,10 @@ function renderSim(body) {
     } else hpRead.v.textContent = '—';
   };
   // A ~60 fps timer reading the real clock (keeps going in a background tab, unlike animation frames).
+  const startAt = performance.now() + startDelay;
   const frame = () => {
     const now = performance.now();
+    if (now < startAt) return; // the clock starts after the opening pause
     if (last !== null && !paused) clock += (now - last) / 1000 * o.speed;
     last = now;
     while (i < events.length && events[i].t <= clock) {
@@ -1579,7 +1630,9 @@ function renderSim(body) {
       if (e.ferocity) procs.ferocity.fire();
       if (e.swipe) procs.swipe.fire();
       if (e.bonuses.length) procs.bonus.fire(e.bonuses);
+      graphic?.hit(e);
     }
+    graphic?.tick(clock);
     for (const { k, row, detail } of phaseRows) {
       const now = phases.find((p) => p.kind === k && clock >= p.start && clock < p.end);
       row.classList.toggle('on', !!now);
@@ -1588,9 +1641,10 @@ function renderSim(body) {
     show();
     if (i >= events.length && clock >= fightEnd) {
       for (const { row } of phaseRows) row.classList.remove('on');
+      graphic?.finish();
       stopSimPlayback();
       playBtn.disabled = true;
-      playBtn.textContent = s.killedAt !== null ? 'Killed' : s.despawned ? 'Despawned' : 'Done';
+      playBtn.textContent = s.killedAt !== null ? 'Killed' : s.despawned ? 'Failed' : 'Done';
     }
   };
   show();

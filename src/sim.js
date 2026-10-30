@@ -105,7 +105,8 @@ export function simulate(input, opts = {}) {
     const hitPart = ev.damage - feroPart;
     events.push({ ...ev, ferocity: 0, damage: hitPart, total: ev.total - feroPart, hp: hpBefore === undefined ? ev.hp : Math.max(0, hpBefore - hitPart) });
     events.push({ t: ev.t + FEROCITY_DELAY_S, feroOnly: true, hit: 0, crit: false, ferocity: ev.ferocity, swipe: 0, bonuses: [],
-      damage: feroPart, total: ev.total, hp: ev.hp, maxHp: ev.maxHp, target: ev.target, shielded: ev.shielded });
+      damage: feroPart, total: ev.total, hp: ev.hp, maxHp: ev.maxHp, target: ev.target, shielded: ev.shielded,
+      shieldLeft: ev.shieldLeftEnd ?? ev.shieldLeft });
   };
   const endTick = Math.round((mode === 'kill' ? SIM_MAX_SECONDS : duration) * TICKS_PER_SECOND);
   let total = 0;
@@ -375,14 +376,16 @@ export function simulate(input, opts = {}) {
     if (crit) out.crits++;
     out.ferocity += strikes;
     if (shield) {
-      // The shield takes hits, not damage.
+      // The shield takes hits, not damage. Events carry the hits left (after the hit, then after its strikes).
+      const afterHit = Math.max(0, shield.left - 1);
       shield.left -= 1 + strikes;
+      const left = Math.max(0, shield.left);
       if (shield.left <= 0) {
         phases.push({ kind: 'shield', start: shield.start, end: t });
         shield = null;
         if (nextGlyph !== null && nextGlyph < t) nextGlyph = t + boss.glyphs.hold;
       }
-      record({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true });
+      record({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, shieldLeft: afterHit, shieldLeftEnd: left });
       tick += ticksPerHit;
       continue;
     }

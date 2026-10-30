@@ -26,6 +26,10 @@ Crit         = floor(Initial × Additive × Multiplier × (1 + Crit Damage / 100
 
 Every stat source is summed into Damage, Strength and Crit Damage first; each bonus then goes into the Additive or Multiplier term depending on how the game stacks it.
 
+## Enemy sprites
+
+The enemy pictures shown in the fight simulation, `public/mobs/`, are the mob renders and head sprites of the [Hypixel SkyBlock Wiki](https://hypixelskyblock.minecraft.wiki/), used under [CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/). They are downloaded by `scripts/mob-sprites.mjs`, as the wiki's own resized thumbnails. The textures themselves are Minecraft's, © Mojang; this is an unofficial, non-commercial fan project, not affiliated with Hypixel or Mojang.
+
 ## Font
 
 All text uses a Minecraft-style pixel font, `public/fonts/marlowww.otf`. It was converted (ASCII glyphs only) from the font textures of the MIT-licensed resource pack [Marlowww Texture pack PVP & More](https://modrinth.com/resourcepack/totem-of-marlowww) by btwreynahd; the license notice is in `public/fonts/LICENSE-marlowww.txt`.
