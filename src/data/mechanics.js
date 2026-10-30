@@ -855,6 +855,8 @@ export const LUST_FOR_BLOOD_PER_LEVEL = 3;
 export const lustForBloodCap = (level) => 10 * Math.floor(level / 5) + (level >= 50 ? 1000 : 0);
 // Book of Progression's Extra Infliction: +0.01% per SkyBlock level from 75, up to 5% (multiplicative).
 export const EXTRA_INFLICTION = { from: 75, perLevel: 0.01, max: 5 };
+// Stats every SkyBlock level grants (wiki, SkyBlock Level).
+export const SKYBLOCK_LEVEL_STATS = { health: 5, strengthEvery: 5 };
 export const TWILIGHT_POISON_MULT = 1.1;
 
 export const DUNGEON_CLASSES = [

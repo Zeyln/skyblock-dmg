@@ -4,7 +4,7 @@ import {
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
   ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, WEAPON_ABILITIES, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
-  LUST_FOR_BLOOD_PER_LEVEL, lustForBloodCap, EXTRA_INFLICTION, TWILIGHT_POISON_MULT,
+  LUST_FOR_BLOOD_PER_LEVEL, lustForBloodCap, EXTRA_INFLICTION, TWILIGHT_POISON_MULT, SKYBLOCK_LEVEL_STATS,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
 } from './data/mechanics.js';
@@ -379,8 +379,10 @@ export function calculate(input) {
     }
   }
 
-  // Book of Progression's Extra Infliction (×, from SkyBlock level 75) and Twilight Arrow Poison (bows).
+  // SkyBlock level: +5 Health per level, +1 Strength per 5 levels (wiki, SkyBlock Level). The Book of
+  // Progression is a free level reward, so its Extra Infliction (×, from level 75) comes with the level.
   const sbl = Math.max(0, Math.floor(input.skyblockLevel || 0));
+  if (sbl) sources.push({ label: `SkyBlock level ${sbl}`, stats: { HEALTH: SKYBLOCK_LEVEL_STATS.health * sbl, STRENGTH: Math.floor(sbl / SKYBLOCK_LEVEL_STATS.strengthEvery) } });
   if (sbl >= EXTRA_INFLICTION.from) {
     const pct = Math.min(EXTRA_INFLICTION.max, sbl * EXTRA_INFLICTION.perLevel);
     multiplicative.push({ label: `Book of Progression: Extra Infliction (SkyBlock ${sbl})`, value: 1 + pct / 100 });

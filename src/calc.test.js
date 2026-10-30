@@ -815,3 +815,11 @@ describe('Overload', () => {
     expect(calculate({ weapon: sword }).megaChance).toBe(0);
   });
 });
+
+describe('SkyBlock level', () => {
+  it('+5 Health per level and +1 Strength per 5 levels', () => {
+    const r = calculate({ skyblockLevel: 302 });
+    expect(r.totals.HEALTH).toBe(1510);
+    expect(r.strength).toBe(60);
+  });
+});

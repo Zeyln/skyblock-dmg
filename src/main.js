@@ -975,8 +975,8 @@ function bonusSection() {
     h('div', { class: 'grid' },
       numField('Combat level', 'combatLevel', { min: 0, max: 60, step: 1 }),
       numField(`Catacombs level (0–${CATACOMBS_MAX_LEVEL})`, 'catacombsLevel', { min: 0, max: CATACOMBS_MAX_LEVEL, step: 1, rerender: true }),
-      // Book of Progression's Extra Infliction scales with it (from level 75); blank: no book.
-      numField('SkyBlock level (Book of Progression)', 'skyblockLevel', { min: 0, step: 1 }),
+      // Gives Health and Strength, and the Book of Progression's Extra Infliction from level 75.
+      numField('SkyBlock level', 'skyblockLevel', { min: 0, step: 1 }),
       // Only special mayors that change a hit are listed.
       selectField('Mayor', 'mayor', [{ value: '', label: 'Other / none', cls: 'muted' },
         ...Object.entries(MAYORS).map(([id, name]) => ({ value: id, label: name, note: MAYOR_EFFECTS[id] }))], { rerender: true }),
