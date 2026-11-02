@@ -8,6 +8,7 @@ import { parseFormatting } from './mctext.js';
 import { detectSets, evaluateSets } from './data/sets.js';
 import { simulate } from './sim.js';
 import { createSimGraphic } from './simGraphic.js';
+import { PHASE_LABELS } from './bossMechanics.js';
 import { mobSprite } from './data/mobSprites.js';
 import {
   PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
@@ -1550,18 +1551,9 @@ function renderSim(body, startDelay = 0) {
     hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
   };
   // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
-  const PHASE_LABELS = {
-    shield: 'Hitshield', laser: 'Broken Heart Radiation', glyph: 'Yang Glyph', heads: 'Nukekubi Fixations',
-    leap: 'Backstab', web: 'Web of Lies', brood: 'Conjoined Brood',
-    hellion: 'Hellion Shield', split: 'Demonsplit', pillar: 'Fire Pillar', swap: 'Dagger swap',
-    pups: 'Call the pups!',
-    crystal: 'End Crystal', skulls: 'Summoned Skulls', reflect: 'Damage Shield',
-    enrage: 'Enrage', boom: 'Thermonuclear',
-    clutch: 'Clutch',
-  };
   const phases = s.phases || [];
   // Every phase the boss can have, so the list doesn't change with how the fight went.
-  const phaseRows = Object.entries(PHASE_LABELS).filter(([k]) => (s.phaseKinds || []).includes(k))
+  const phaseRows = (s.phaseKinds || []).map((k) => [k, PHASE_LABELS[k]])
     .map(([k, label]) => {
       // A phase can name what's happening (e.g. the shield's attunement and the dagger in hand).
       const detail = h('span', { class: 'sim-bonuses' });

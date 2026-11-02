@@ -3,8 +3,9 @@ import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
   FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_ARROWS,
   LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S, PILLAR_REACH_S,
-  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, WIPE_TIMER_S, bossPhases,
+  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, WIPE_TIMER_S, enemyBlocks,
 } from './data/mechanics.js';
+import { legacyBoss, phaseKinds, despawnSeconds, regenPerSecond } from './bossMechanics.js';
 
 // Phase thresholds that stop damage to the boss: Hitshield and beams (Voidgloom), Call the Pups (Sven),
 // Demonsplit (Demonlord), Web of Lies (Broodfather), the Mage Outlaw's 10M specials.
@@ -147,9 +148,13 @@ function fight(input, opts, skip) {
   let killedAt = null;
   let lastToss = -Infinity;
 
-  // Boss phases (data/mechanics.js bossPhases): each is { kind, start, end } in seconds, for the
-  // indicator. HP thresholds trigger in order as the boss's HP falls past them.
-  const boss = maxHp ? bossPhases(input.target?.enemy) : null;
+  // Boss phases, from the enemy's mechanic blocks (data/bosses.js, bossMechanics.js): each is
+  // { kind, start, end } in seconds, for the indicator. HP thresholds trigger in order as the boss's
+  // HP falls past them.
+  const blocks = maxHp ? enemyBlocks(input.target?.enemy) : [];
+  const boss = legacyBoss(blocks);
+  const despawnS = despawnSeconds(blocks);
+  const regen = regenPerSecond(blocks);
   const phases = [];
   const startFrac = hp / maxHp;
   const triggers = boss ? [
@@ -273,7 +278,7 @@ function fight(input, opts, skip) {
   let nextLeap = boss?.leaps ? boss.leaps.every : null;
   // Web of Lies: swap to a shortbow and shoot the egg sacs (Piercing hits them all), no melee meanwhile.
   const sacShot = shortbowTicks(base.totals.ATTACK_SPEED || 0) / TICKS_PER_SECOND;
-  const despawnTick = boss?.despawnS ? boss.despawnS * TICKS_PER_SECOND : Infinity;
+  const despawnTick = despawnS ? despawnS * TICKS_PER_SECOND : Infinity;
   // Inferno Demonlord: the shield's attunement, the demons once split, fire pillars, and the
   // attunement the player is holding (a dagger swap or toggle costs DAGGER_SWAP_S).
   const derpy = input.target?.maxHp ? (base.targetMaxHp || 0) / input.target.maxHp : 1;
@@ -578,7 +583,7 @@ function fight(input, opts, skip) {
     }
     if (maxHp) {
       bossStrikes = bossStrikes.filter((e) => e.t > t);
-      if (boss?.regen && !broodOn) hp = Math.min(maxHp, hp + boss.regen * maxHp * (t - regenAt));
+      if (regen && !broodOn) hp = Math.min(maxHp, hp + regen * maxHp * (t - regenAt));
       regenAt = t;
       hp -= dealt; // below 0 is fine until the strikes are settled
     }
@@ -636,7 +641,7 @@ function fight(input, opts, skip) {
     running += e.damage;
     e.total = running;
     let before = hpOf.has(e.tid) ? hpOf.get(e.tid) : e.tidStart;
-    if (boss?.regen && e.tid === 'boss' && before > 0) before = Math.min(bossMax, before + boss.regen * bossMax * (e.t - (lastAt.get(e.tid) ?? 0)));
+    if (regen && e.tid === 'boss' && before > 0) before = Math.min(bossMax, before + regen * bossMax * (e.t - (lastAt.get(e.tid) ?? 0)));
     lastAt.set(e.tid, e.t);
     e.hp = Math.max(0, before - e.damage);
     hpOf.set(e.tid, e.hp);
@@ -646,8 +651,8 @@ function fight(input, opts, skip) {
   if (fatal >= 0) killedAt = events[fatal].t;
 
   const limit = mode === 'kill' ? SIM_MAX_SECONDS : duration;
-  const despawned = killedAt === null && boss?.despawnS < limit;
-  const seconds = killedAt ?? (despawned ? boss.despawnS : limit);
+  const despawned = killedAt === null && despawnS !== null && despawnS < limit;
+  const seconds = killedAt ?? (despawned ? despawnS : limit);
   // Strikes still pending at the kill, the despawn or the end of the time never land.
   if (fatal >= 0) events.length = fatal + 1;
   else while (events.length && events.at(-1).t > seconds + 1e-9) events.pop();
@@ -658,7 +663,7 @@ function fight(input, opts, skip) {
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
   for (let i = phases.length - 1; i >= 0; i--) if (phases[i].start >= seconds && phases[i].kind === 'enrage') phases.splice(i, 1); // never got to it
-  if (despawned) notes.push(`The boss despawned after ${boss.despawnS / 60} minutes: the Slayer quest failed.`);
+  if (despawned) notes.push(`The boss despawned after ${despawnS / 60} minutes: the Slayer quest failed.`);
   else if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
@@ -679,12 +684,6 @@ function fight(input, opts, skip) {
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
     hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics,
     // Every phase this boss can have, whether or not this fight got to it (for the indicator).
-    phaseKinds: !boss ? [] : [
-      boss.shield && 'shield', boss.lasers && 'laser', boss.glyphs && 'glyph', boss.heads && 'heads',
-      boss.leaps && 'leap', boss.webs && 'web', boss.brood && 'brood',
-      boss.hellion && 'hellion', boss.split && 'split', boss.pillars && 'pillar', boss.hellion && weapons.length > 1 && 'swap',
-      boss.pups && 'pups', ...(boss.outlaw ? ['crystal', 'skulls', 'reflect'] : []),
-      boss.enrage && 'enrage', boss.boom && 'boom', (boss.glyphs || boss.pillars || boss.boom) && 'clutch',
-    ].filter(Boolean),
+    phaseKinds: phaseKinds(blocks, { weapons: weapons.length }),
   };
 }

@@ -3,6 +3,7 @@
 // createSimGraphic(...).hit(event) for every event replayed, .tick(clock) every frame.
 import { h } from './dom.js';
 import { mobSprite } from './data/mobSprites.js';
+import { PHASE_ROWS, nametagStatus } from './bossMechanics.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const svg = (tag, attrs = {}) => {
@@ -90,7 +91,6 @@ export function createSimGraphic(s, { labels, name, boss }) {
   const icon = (name, color) => h('i', { class: `ico ico-${name}`, style: `color:var(--tag-${color})` });
   const tagName = (n) => n.replace(/ \([^)]*\)$/, '').replace(/ (I|II|III|IV|V)$/, '');
   const activeAt = (kind) => (s.phases || []).find((p) => p.kind === kind && tagClock >= p.start && tagClock < p.end);
-  const ATTUNE = { Ashen: '7', Spirit: 'f', Auric: 'e', Crystal: 'b' };
   function renderTag() {
     placeTag();
     const who = last?.target || name;
@@ -109,20 +109,10 @@ export function createSimGraphic(s, { labels, name, boss }) {
         : last?.shielded && last.shieldLeft != null ? last.shieldLeft : null;
       health = [seg(left != null ? `${left} Hits` : 'Hitshield', 'd', true)];
     }
-    // A status line above the name for phases that stop damage or change what's needed.
-    const laser = activeAt('laser');
-    const skulls = activeAt('skulls');
-    const hellion = activeAt('hellion');
-    let status = null;
-    if (laser) status = seg('IMMUNE', 'c', true);
-    else if (activeAt('reflect')) status = seg('SHIELD', 'b', true);
-    else if (activeAt('pups')) status = seg('Protected', 'c');
-    else if (activeAt('boom')) status = seg('Boom!', 'c', true);
-    else if (skulls && tagClock < skulls.start + 1) status = seg('Invulnerable', '5');
-    else if (hellion) {
-      const att = hellion.detail.split(' · ')[0];
-      status = seg(att.toUpperCase(), ATTUNE[att] || 'f', true);
-    }
+    // A status line above the name for phases that stop damage or change what's needed (each
+    // mechanic's row says what, bossMechanics.js).
+    const st = nametagStatus(s.phaseKinds || [], s.phases || [], tagClock);
+    const status = st ? seg(...st) : null;
     const key = [who, health.map((x) => x.textContent).join(''), status?.textContent].join('|');
     if (key === tagKey) return;
     tagKey = key;
@@ -171,7 +161,7 @@ export function createSimGraphic(s, { labels, name, boss }) {
 
   // Phase bands: one color per kind of phase (fixed order, at most four), drawn up to the clock.
   // Hellion Shield lasts the whole Demonlord fight, so it isn't a band.
-  const kinds = (s.phaseKinds || []).filter((k) => k !== 'hellion' && k !== 'clutch' && labels[k]).slice(0, 4);
+  const kinds = (s.phaseKinds || []).filter((k) => PHASE_ROWS[k]?.band !== false && labels[k]).slice(0, 4);
   const bandLayer = svg('g');
   const bands = (s.phases || []).filter((p) => kinds.includes(p.kind)).map((p) => {
     const rect = svg('rect', { y: M.top, height: PLOT_H, x: x(p.start), width: 0, class: `band band-${kinds.indexOf(p.kind) + 1}` });

@@ -615,3 +615,19 @@ describe('Revenant Horror phases', () => {
     expect(s.seconds).toBe(180);
   });
 });
+
+describe('mechanic blocks', () => {
+  it('every block an enemy has is a defined mechanic, and every row has a label', async () => {
+    const { ENEMIES } = await import('./data/mechanics.js');
+    const { MECHANICS, PHASE_ROWS, phaseKinds } = await import('./bossMechanics.js');
+    for (const e of ENEMIES) {
+      for (const b of e.blocks) expect(MECHANICS[b.kind], `${e.name}: ${b.kind}`).toBeDefined();
+      for (const k of phaseKinds(e.blocks, { weapons: 2 })) expect(PHASE_ROWS[k]?.label, `${e.name}: ${k}`).toBeTruthy();
+    }
+  });
+
+  it('a block can be shared: the same object on several enemies', async () => {
+    const { ENEMIES, SLAYER_DESPAWN } = await import('./data/mechanics.js');
+    expect(ENEMIES.filter((e) => e.blocks.includes(SLAYER_DESPAWN)).length).toBeGreaterThan(5);
+  });
+});
