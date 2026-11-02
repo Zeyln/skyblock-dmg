@@ -96,11 +96,23 @@ describe('per-hit effects', () => {
 });
 
 describe('playback events', () => {
-  it('Ferocity strikes land 100 ms after their hit, as their own event', () => {
+  it('Ferocity strikes land one by one, 100 ms after their hit and 100 ms apart', () => {
     const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 200 }) }), { duration: 1 });
-    expect(s.events.map((e) => [e.t, e.feroOnly ? 'fero' : 'hit', e.damage])).toEqual([
-      [0, 'hit', 100], [0.1, 'fero', 200], [0.5, 'hit', 100], [0.6, 'fero', 200]]);
+    expect(s.events.map((e) => [Math.round(e.t * 1000), e.feroOnly ? 'fero' : 'hit', e.damage])).toEqual([
+      [0, 'hit', 100], [100, 'fero', 100], [200, 'fero', 100], [500, 'hit', 100], [600, 'fero', 100], [700, 'fero', 100]]);
     expect(s.total).toBe(600);
+  });
+
+  it('strikes still to come land after the next hit, in time order', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 400, ATTACK_SPEED: 100 }) }, { target: { maxHp: 1e6 } }), { duration: 1 });
+    const order = s.events.map((e) => [Math.round(e.t * 1000), e.feroOnly ? 'fero' : 'hit']);
+    expect(order.slice(0, 7)).toEqual([[0, 'hit'], [100, 'fero'], [200, 'fero'], [250, 'hit'], [300, 'fero'], [350, 'fero'], [400, 'fero']]);
+    for (let i = 1; i < s.events.length; i++) {
+      expect(s.events[i].t).toBeGreaterThanOrEqual(s.events[i - 1].t);
+      expect(s.events[i].hp).toBeLessThanOrEqual(s.events[i - 1].hp);
+      expect(s.events[i].total).toBe(s.events[i - 1].total + s.events[i].damage);
+    }
+    expect(s.events.every((e) => e.t <= 1)).toBe(true);
   });
 
   it('a kill by Ferocity strikes alone lands 100 ms after the hit', () => {
@@ -172,7 +184,9 @@ describe('Voidgloom Seraph phases', () => {
     const strike = s.events[s.events.indexOf(hits[3]) + 1];
     expect(strike).toMatchObject({ feroOnly: true, ferocity: 1 });
     expect(strike.t - hits[3].t).toBeCloseTo(0.1);
-    expect(s.phases[0]).toMatchObject({ kind: 'shield', start: 0, end: 1 });
+    // It breaks on the third swing's last strike: 1 s + 100 ms + 3 × 100 ms.
+    expect(s.phases[0]).toMatchObject({ kind: 'shield', start: 0 });
+    expect(s.phases[0].end).toBeCloseTo(1.4);
   });
 
   it('T4: shields, laser immunity, glyph breaks and heads all play out', () => {
@@ -188,23 +202,67 @@ describe('Voidgloom Seraph phases', () => {
       if (i) expect(p.start - batches[i - 1].start).toBe(12);
     }
     expect(kinds('glyph').length).toBeGreaterThan(0);
-    // T4 shields are shot down with a Terminator in 2.5–3 s, with no melee hits meanwhile.
+    // T4 shields are shot down with a Terminator, with no melee hits meanwhile: 3 arrows a shot every
+    // 0.5 s (0 attack speed, no Ferocity), so 34 shots for 100 hits.
     for (const p of kinds('shield')) {
-      expect(p.end - p.start).toBeGreaterThanOrEqual(2.5);
-      expect(p.end - p.start).toBeLessThanOrEqual(3);
+      expect(p.shots).toHaveLength(34);
+      expect(p.end - p.start).toBeCloseTo(16.5);
+      expect(p.left.at(-1)).toEqual([p.end, 0]);
     }
     expect(s.events[0].t).toBeGreaterThanOrEqual(kinds('shield')[0].end);
     expect(s.events.some((e) => e.shielded)).toBe(false);
-    // No hits while immune (after the first 2 s of each laser) or while breaking a glyph.
+    // No hits while immune (the whole laser) or while breaking a glyph.
     const hitIn = (a, b) => s.events.some((e) => e.t >= a && e.t < b);
-    for (const p of kinds('laser')) expect(hitIn(p.start + 2, p.end)).toBe(false);
+    for (const p of kinds('laser')) {
+      expect(hitIn(p.start + 1e-9, p.end)).toBe(false);
+      expect(s.events.filter((e) => e.t > p.start && e.t < p.end).every((e) => e.damage === 0)).toBe(true);
+    }
     for (const p of kinds('shield')) expect(hitIn(p.start + 1e-9, p.end)).toBe(false);
     for (const p of kinds('glyph')) {
+      // At least the break itself; longer when the glyph lands while the player is busy (it waits).
       expect(p.end - p.start).toBeGreaterThanOrEqual(0.5);
-      expect(p.end - p.start).toBeLessThanOrEqual(0.75);
       expect(hitIn(p.start, p.end)).toBe(false);
     }
     expect(s.killedAt).toBeGreaterThan(3 * 2.5 + 3 * 6);
+  });
+
+  it('T4 beams are immune from the start, and strikes past a shield or beam line are absorbed', () => {
+    // 30M a swing and one strike (400 / 4): from 180M the strike crosses 5/6 (175M), and the beams start on it.
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 3e7, FEROCITY: 400 }) }, { target: seraph('IV', 210e6) }), { mode: 'kill' });
+    const shields = s.phases.filter((p) => p.kind === 'shield');
+    const lasers = s.phases.filter((p) => p.kind === 'laser');
+    expect(lasers[0].start).toBeCloseTo(shields[0].end + 0.1);
+    for (const a of shields) for (const b of lasers) expect(a.start < b.end - 1e-6 && b.start < a.end - 1e-6).toBe(false);
+    for (const p of lasers) expect(s.events.some((e) => e.t > p.start && e.t < p.end - 1e-6 && e.damage > 0)).toBe(false);
+    // The strike that crosses 2/3 is capped at it (145M → 140M), and the shield starts on it.
+    const crossing = s.events.find((e) => !e.shielded && e.t >= shields[1].start - 1e-9 - 0.1);
+    expect(crossing.hp).toBeCloseTo(145e6, -2);
+    const strike = s.events[s.events.indexOf(crossing) + 1];
+    expect(strike).toMatchObject({ feroOnly: true });
+    expect(strike.hp).toBeCloseTo(140e6, -2);
+    expect(strike.t).toBeCloseTo(shields[1].start);
+  });
+
+  it('one hit can’t jump past the next phase: its damage stops at the line', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 1e9 }) }, { target: seraph('IV', 210e6) }), { mode: 'kill' });
+    const lines = [5 / 6, 2 / 3, 1 / 2, 1 / 3, 1 / 6].map((f) => f * 210e6);
+    const hits = s.events.filter((e) => !e.shielded && e.damage > 0);
+    hits.slice(0, 5).forEach((e, i) => expect(e.hp).toBeCloseTo(lines[i], -1));
+    expect(s.phases.filter((p) => p.kind === 'shield')).toHaveLength(3);
+    expect(s.phases.filter((p) => p.kind === 'laser')).toHaveLength(3);
+    expect(hits.at(-1).hp).toBe(0);
+  });
+
+  it('Clutch: a Yang Glyph is left alone when the boss dies within its 5 s anyway', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 1e5 }) }, { target: seraph('II', 12e6) }), { mode: 'kill' });
+    const m = s.mechanics.at(-1);
+    expect(m).toMatchObject({ kind: 'glyph', clutch: true });
+    expect(s.killedAt).toBeLessThanOrEqual(m.land + 5);
+    expect(s.phases.some((p) => p.kind === 'glyph' && p.start === m.land)).toBe(false);
+    expect(s.phases.find((p) => p.kind === 'clutch').detail).toMatch(/^Yang Glyph · \d+\.\d s left$/);
+    expect(s.phaseKinds).toContain('clutch');
+    // Earlier glyphs were too far from the kill, and were broken.
+    expect(s.mechanics.slice(0, -1).every((x) => !x.clutch)).toBe(true);
   });
 
   it('below T4, a Terminator breaks shields only above 900 Magical Power', () => {
@@ -212,13 +270,36 @@ describe('Voidgloom Seraph phases', () => {
     expect(run(900).events.slice(0, 60).every((e) => e.shielded)).toBe(true); // 60 hits by hand
     const fast = run(901);
     expect(fast.events.some((e) => e.shielded)).toBe(false);
-    expect(fast.phases[0].end).toBeLessThanOrEqual(3);
+    expect(fast.phases[0].end).toBeCloseTo(9.5); // 60 hits: 20 shots of 3 arrows, 0.5 s apart
+  });
+
+  it('a Terminator shoots faster and harder with its own stats', () => {
+    // Terminator: 40 attack speed (8-tick shots); with 200 Ferocity each arrow is 3 hits, 9 a shot.
+    const terminator = { id: 'TERMINATOR', name: 'Terminator', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 310, ATTACK_SPEED: 40, FEROCITY: 200 } };
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { target: seraph('IV', 1e12), terminator }), { duration: 20 });
+    const p = s.phases.find((x) => x.kind === 'shield');
+    expect(p.shots).toHaveLength(12); // ceil(100 / 9)
+    expect(p.end - p.start).toBeCloseTo(11 * 0.4);
+    // Each shot: 3 explosions at once, then their strikes one by one, 100 ms apart.
+    expect(p.left.slice(0, 9).map(([x, left]) => [Math.round((x - p.start) * 1000), left])).toEqual([
+      [0, 99], [0, 98], [0, 97], [100, 96], [100, 95], [100, 94], [200, 93], [200, 92], [200, 91]]);
+  });
+
+  it('by hand, the shield loses a hit per strike as each lands, and breaks on the last one', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 200 }) }, { target: seraph('III', 1e9) }), { duration: 40 });
+    const shielded = s.events.filter((e) => e.shielded);
+    const p = s.phases.find((x) => x.kind === 'shield');
+    const first = shielded.filter((e) => e.t <= p.end);
+    first.forEach((e, i) => expect(e.shieldLeft).toBe(first.length - i - 1));
+    expect(first.at(-1).t).toBeCloseTo(p.end);
+    expect(first.at(-1).feroOnly).toBe(true);
+    expect(s.events.some((e) => !e.shielded && e.t < p.end)).toBe(false);
   });
 
   it('other enemies have no phases', () => {
     const s = simulate(noCrit({ item: sword({ DAMAGE: 95, FEROCITY: 400 }) }, { target: { maxHp: 1e9 } }), { duration: 1 });
     expect(s.phases).toEqual([]);
-    expect(s.events[1]).toMatchObject({ feroOnly: true, ferocity: 4 });
+    expect(s.events.slice(1, 5).map((e) => e.feroOnly && e.ferocity)).toEqual([1, 1, 1, 1]);
   });
 });
 
@@ -323,6 +404,21 @@ describe('Inferno Demonlord phases', () => {
     expect(pillars[1].start - pillars[0].start).toBeCloseTo(20);
   });
 
+  it('Clutch: a pillar is left alone when the boss dies within its 7 s anyway', () => {
+    const s = run(dagger('HEARTFIRE_DAGGER', 25e3), dagger('HEARTMAW_DAGGER', 25e3), lord('II', 10e6));
+    const m = s.mechanics.at(-1);
+    expect(m).toMatchObject({ kind: 'pillar', clutch: true });
+    expect(s.killedAt).toBeLessThanOrEqual(m.deadline);
+    expect(s.killedAt).toBeGreaterThan(m.land);
+    expect(s.phases.some((p) => p.kind === 'pillar' && p.start === m.land)).toBe(false);
+    expect(s.phases.find((p) => p.kind === 'clutch')).toMatchObject({ start: m.land, end: s.killedAt });
+    expect(s.events.some((e) => e.t > m.land && e.t < s.killedAt && !e.feroOnly)).toBe(true);
+    // Too far from the kill: the pillar is broken as usual.
+    const slow = run(dagger('HEARTFIRE_DAGGER', 20e3), dagger('HEARTMAW_DAGGER', 20e3), lord('II', 10e6));
+    expect(slow.mechanics.some((x) => x.clutch)).toBe(false);
+    expect(slow.phases.some((p) => p.kind === 'clutch')).toBe(false);
+  });
+
   it('T1: no shield; Quazii, then Typhoeus', () => {
     const s = run(dagger('HEARTFIRE_DAGGER', 50e3), null, lord('I', 2.5e6));
     expect(s.phases.some((p) => p.kind === 'hellion' || p.kind === 'swap')).toBe(false);
@@ -425,5 +521,72 @@ describe('Golem Toss in the simulation', () => {
     // Hits every 0.5 s: hit 5 at 2 s tosses; hit 10 (4.5 s) is on cooldown; hit 15 (7 s) tosses.
     const tossed = s.events.filter((e) => e.hit === 500).map((e) => e.t);
     expect(tossed).toEqual([2, 7]);
+  });
+});
+
+describe('Soulcry carried over to the Terminator', () => {
+  it('a Vorpal Katana Soulcry adds 300 Ferocity to the Terminator shots', () => {
+    const terminator = { id: 'TERMINATOR', name: 'Terminator', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 310, ATTACK_SPEED: 40 } };
+    const vorpal = { id: 'VORPAL_KATANA', name: 'Vorpal Katana', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95 } };
+    const target = { enemy: 'Voidgloom Seraph IV', maxHp: 1e12, mobs: ['Ender'], families: ['Enderman'], boss: true };
+    const shots = (abilityOn) => simulate(noCrit({ item: vorpal, abilityOn }, { target, terminator }), { duration: 20 })
+      .phases.find((p) => p.kind === 'shield').shots.length;
+    expect(shots(false)).toBe(34); // 3 hits a shot
+    expect(shots(true)).toBe(9); // 300 Ferocity: 4 hits an arrow, 12 a shot
+  });
+});
+
+describe('Ferocity strikes past a phase line', () => {
+  const run = (target, DAMAGE) => simulate(noCrit({ item: sword({ DAMAGE, FEROCITY: 400 }) }, { target }), { mode: 'kill' });
+  // No damage to the boss itself once the phase has started, from strikes still on their way either.
+  const bossDamageIn = (s, a, b) => s.events.filter((e) => e.tid === 'boss' && e.t > a + 1e-9 && e.t < b - 1e-6 && e.damage > 0);
+  const cases = [
+    ['Sven pups', { enemy: 'Sven Packmaster IV', maxHp: 2e6, mobs: ['Animal'], families: ['Wolf'], boss: true }, 1e5, ['pups'], (p) => p.end],
+    ['Demonsplit', { enemy: 'Inferno Demonlord I', maxHp: 2.5e6, mobs: ['Infernal'], boss: true }, 5e4, ['split'], (p) => p.end],
+    ['Web of Lies', { enemy: 'Tarantula Broodfather III', maxHp: 1e6, mobs: ['Arthropod'], boss: true }, 2e4, ['web'], (p) => p.end],
+    ['Mage Outlaw specials', { enemy: 'Mage Outlaw', maxHp: 70e6, mobs: ['Humanoid', 'Arcane'], boss: true }, 1e6, ['reflect', 'skulls'],
+      (p) => (p.kind === 'skulls' ? p.start + 1 : p.end)],
+  ];
+  for (const [name, target, dmg, kinds, until] of cases) {
+    it(`${name}: absorbed once the phase starts`, () => {
+      const s = run(target, dmg);
+      const phases = s.phases.filter((p) => kinds.includes(p.kind));
+      expect(phases.length).toBeGreaterThan(0);
+      for (const p of phases) expect(bossDamageIn(s, p.start, until(p))).toEqual([]);
+    });
+  }
+});
+
+describe('Atoned Horror phases', () => {
+  const atoned = { enemy: 'Atoned Horror', maxHp: 10e6, mobs: ['Undead'], boss: true };
+  const run = (DAMAGE, opts) => simulate(noCrit({ item: sword({ DAMAGE }) }, { target: atoned }), { mode: 'kill', ...opts });
+
+  it('Thermonuclear every 30 s: hits for 4.5 s of the countdown, then 2 s out of range', () => {
+    const s = run(5e4);
+    const booms = s.phases.filter((p) => p.kind === 'boom');
+    expect(booms.map((p) => p.start)).toEqual([30, 60, 90]);
+    for (const p of booms) {
+      expect(p.end - p.start).toBeCloseTo(6.5);
+      expect(s.events.some((e) => e.t >= p.start && e.t < p.start + 4.5)).toBe(true);
+      expect(s.events.some((e) => e.t >= p.start + 4.5 && e.t < p.end - 1e-9)).toBe(false);
+    }
+  });
+
+  it('natural regeneration: 1/1000 of max health a second between hits', () => {
+    const s = run(5e4, { mode: 'duration', duration: 3 });
+    for (let i = 1; i < s.events.length; i++) {
+      const [a, b] = [s.events[i - 1], s.events[i]];
+      expect(b.hp).toBeCloseTo(Math.min(10e6, a.hp + 10e6 / 1000 * (b.t - a.t)) - b.damage, 0);
+    }
+    expect(s.events.at(-1).hp).toBeGreaterThan(10e6 - s.total);
+  });
+
+  it('Clutch: stays in when the boss dies within the 5 s countdown', () => {
+    const s = run(9e4);
+    const m = s.mechanics.at(-1);
+    expect(m).toMatchObject({ kind: 'boom', clutch: true });
+    expect(s.killedAt).toBeLessThanOrEqual(m.land + 5);
+    expect(s.phases.find((p) => p.kind === 'clutch').detail).toMatch(/^Thermonuclear lightning · /);
+    expect(s.phaseKinds).toEqual(['boom', 'clutch']);
   });
 });

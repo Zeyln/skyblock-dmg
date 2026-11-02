@@ -73,17 +73,24 @@ export function createSimGraphic(s, { labels, name, boss }) {
     // Health: compact for bosses, current/max otherwise; during a Hitshield, the hits left instead.
     let health = !max ? [] : isBoss ? [seg(short(hp).toUpperCase(), 'a'), icon('heart', 'c')]
       : [seg(fmt(hp), 'a'), seg('/', 'f'), seg(fmt(max), 'a'), icon('heart', 'c')];
-    if (activeAt('shield')) {
-      health = [seg(last?.shielded && last.shieldLeft != null ? `${last.shieldLeft} Hits` : 'Hitshield', 'd', true)];
+    // During a Hitshield the plate counts the hits left instead of health: hit by hand, from the hits
+    // replayed; shot down with a Terminator, from its shots so far.
+    const shield = activeAt('shield');
+    if (shield) {
+      const shot = shield.left?.filter(([st]) => st <= tagClock).at(-1);
+      const left = shield.left ? (shot ? shot[1] : shield.left[0][1] + 1)
+        : last?.shielded && last.shieldLeft != null ? last.shieldLeft : null;
+      health = [seg(left != null ? `${left} Hits` : 'Hitshield', 'd', true)];
     }
     // A status line above the name for phases that stop damage or change what's needed.
     const laser = activeAt('laser');
     const skulls = activeAt('skulls');
     const hellion = activeAt('hellion');
     let status = null;
-    if (laser && tagClock >= laser.start + 2) status = seg('IMMUNE', 'c', true);
+    if (laser) status = seg('IMMUNE', 'c', true);
     else if (activeAt('reflect')) status = seg('SHIELD', 'b', true);
     else if (activeAt('pups')) status = seg('Protected', 'c');
+    else if (activeAt('boom')) status = seg('Boom!', 'c', true);
     else if (skulls && tagClock < skulls.start + 1) status = seg('Invulnerable', '5');
     else if (hellion) {
       const att = hellion.detail.split(' · ')[0];
@@ -137,7 +144,7 @@ export function createSimGraphic(s, { labels, name, boss }) {
 
   // Phase bands: one color per kind of phase (fixed order, at most four), drawn up to the clock.
   // Hellion Shield lasts the whole Demonlord fight, so it isn't a band.
-  const kinds = (s.phaseKinds || []).filter((k) => k !== 'hellion' && labels[k]).slice(0, 4);
+  const kinds = (s.phaseKinds || []).filter((k) => k !== 'hellion' && k !== 'clutch' && labels[k]).slice(0, 4);
   const bandLayer = svg('g');
   const bands = (s.phases || []).filter((p) => kinds.includes(p.kind)).map((p) => {
     const rect = svg('rect', { y: M.top, height: PLOT_H, x: x(p.start), width: 0, class: `band band-${kinds.indexOf(p.kind) + 1}` });

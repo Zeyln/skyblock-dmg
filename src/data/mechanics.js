@@ -87,9 +87,9 @@ export function floorStats(enemy, floor) {
   return Array.isArray(v) ? { hp: v[0], defense: v[1] } : { hp: v, defense: enemy.defense || 0 };
 }
 export const ENEMIES = [
-  ...[['I', 500], ['II', 20000], ['III', 400000], ['IV', 1500000], ['V', 10000000]].map(([t, hp]) =>
+  ...[['I', 500], ['II', 20000], ['III', 400000], ['IV', 1500000]].map(([t, hp]) =>
     enemy('Slayer bosses', `Revenant Horror ${t}`, ['Undead'], hp, { boss: true })),
-  enemy('Slayer bosses', 'Atoned Horror', ['Undead'], 10000000, { boss: true }),
+  enemy('Slayer bosses', 'Atoned Horror', ['Undead'], 10000000, { boss: true }), // Revenant Horror V
   ...[['I', 2500], ['II', 50000], ['III', 1000000], ['IV', 2500000], ['V', 10000000]].map(([t, hp]) =>
     enemy('Slayer bosses', `Tarantula Broodfather ${t}`, ['Arthropod'], hp, { boss: true })),
   enemy('Slayer bosses', 'Conjoined Brood', ['Arthropod'], 20000000, { boss: true }),
@@ -925,6 +925,9 @@ export const ATTACK_SPEED_CAP = 100;
 export const FEROCITY_CAP = 500;
 // Ferocity strikes land a moment after the hit that set them off (not documented; 100 ms as observed in play).
 export const FEROCITY_DELAY_S = 0.1;
+// Each further strike from the same hit lands this long after the previous one (observed in play);
+// a new hit doesn't cancel strikes still to come.
+export const FEROCITY_GAP_S = 0.1;
 // Melee: the enemy's invulnerability ticks after a hit, round(10 / (1 + AS/100)).
 export const meleeHitTicks = (as) => Math.round(10 / (1 + Math.min(ATTACK_SPEED_CAP, Math.max(0, as)) / 100));
 // Shortbows: shot cooldown, rounded up. Other bows are assumed fully drawn (1 s) each shot.
@@ -950,7 +953,12 @@ export const DOMINUS_SWIPE_MULT = [[0.5, 1, 1.5], [0.625, 1.25, 1.875], [0.75, 1
 //   Hitshield: on spawn and at 2/3 and 1/3; takes no damage until it has taken this many hits. Ferocity
 //     strikes are counted as hits (the wiki only says Ferocity is weakened while the shield is down).
 //   Ferocity is divided by 4 while the shield is down.
-//   Broken Heart Radiation (T4): at 5/6, 1/2 and 1/6 the boss sits for 8 s, immune for the last 6.
+//   No phase skipping (Apr 2024): the damage that crosses a Hitshield or beam threshold is capped at it,
+//     so the next phase always starts. A Hitshield due while the beams are up starts once they end,
+//     with no Yang Glyphs until it is down (wiki).
+//   Broken Heart Radiation (T4): at 5/6, 1/2 and 1/6 the boss sits for 8 s, immune from the start (the
+//     beams "activate instantly" since a patch players report on the Hypixel forum, which ended
+//     hitting through their start). Ferocity strikes still on their way when it starts do nothing.
 //   Yang Glyphs: from 1/2 (T2) or 2/3 (T3+); held 2 s then thrown, one every 8 s (an older wiki
 //     figure; T3+ are said to throw "more often"), never while the shield is up. Breaking one takes
 //     the player GLYPH_BREAK_S, with no hits meanwhile.
@@ -959,10 +967,17 @@ export const DOMINUS_SWIPE_MULT = [[0.5, 1, 1.5], [0.625, 1.25, 1.875], [0.75, 1
 //     HEAD_BATCH, then looks at them all.
 // The player's own pauses (glyphs, heads) happen one after another, never at the same time.
 //   Hitshield on T4, or any tier above TERMINATOR_MP: the player swaps to a Terminator with explosive
-//     arrows and breaks it in TERMINATOR_SHIELD_S, with no melee hits meanwhile.
+//     arrows and shoots the ground under the boss, with no melee hits meanwhile. Every shot is
+//     TERMINATOR_ARROWS arrows at the shortbow fire rate; the arrows themselves miss, and each one's
+//     explosion is a hit plus its Ferocity strikes (stats with the Terminator held; the shield is up, so
+//     Ferocity isn't divided).
 export const GLYPH_BREAK_S = [0.5, 0.75];
+// Wipe timers (wiki): a Yang Glyph not broken within 5 s of landing, or a Fire Pillar within 7 s, deals
+// 1000 × Max Health as True Damage to everyone fighting the boss. A clutch: when the boss dies before
+// the timer runs out anyway, the player keeps hitting and leaves it alone.
+export const WIPE_TIMER_S = { glyph: 5, pillar: 7, boom: 5 };
 export const TERMINATOR_MP = 900;
-export const TERMINATOR_SHIELD_S = [2.5, 3];
+export const TERMINATOR_ARROWS = 3;
 export const HEAD_LOOK_S = 0.5;
 export const HEAD_BATCH = 2;
 const TIERS = ['I', 'II', 'III', 'IV', 'V'];
@@ -1026,6 +1041,16 @@ export const OUTLAW = {
   shield: { attacks: [['Red Ring', 3], ['Lightning Storm', 8]], linger: 2 },
 };
 
+// Atoned Horror (Revenant Horror V), from its wiki page (Nov 2026):
+//   Natural regeneration: 1/1000 of max health a second, always.
+//   Thermonuclear: every 30 s it stops, a bedrock circle spreads and "Boom!" shows; a hidden 5 s timer
+//     ends in a lightning barrage killing anything within 7 blocks (no protection works). The player
+//     hits until hitUntil, then backs out (out), waits out the barrage and comes back. The barrage
+//     length and the movement times aren't published: assumed. Every 30 s from spawn is assumed.
+//   Explosive Assault's TNT heals it 500k per player hit: left out, as the player dodges it (best case).
+export const ATONED_REGEN = 1 / 1000;
+export const ATONED_BOOM = { every: 30, hitUntil: 4.5, out: 0.5, barrage: 1, back: 0.5 };
+
 export const LEAP_AIM_S = 0.2;
 export const WEB_SWAP_S = 1;
 export function bossPhases(enemyName) {
@@ -1037,12 +1062,13 @@ export function bossPhases(enemyName) {
       despawnS: 240,
       feroDivisor: 4,
       shield: { hits: [15, 30, 60, 100][t], at: [1, 2 / 3, 1 / 3] },
-      lasers: t === 3 ? { at: [5 / 6, 1 / 2, 1 / 6], vulnerable: 2, immune: 6 } : null,
+      lasers: t === 3 ? { at: [5 / 6, 1 / 2, 1 / 6], immune: 8 } : null,
       glyphs: t >= 1 ? { from: t === 1 ? 1 / 2 : 2 / 3, every: 8, hold: 2 } : null,
       heads: t >= 2 ? { from: 1 / 3, every: 6 } : null,
     };
   }
   if (enemyName === 'Mage Outlaw') return { outlaw: OUTLAW };
+  if (enemyName === 'Atoned Horror') return { tier: 5, despawnS: 180, regen: ATONED_REGEN, boom: ATONED_BOOM };
   const sven = /^Sven Packmaster (III|IV)$/.exec(enemyName || '');
   if (sven) return { tier: TIERS.indexOf(sven[1]) + 1, pups: { at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 } };
   const demonlord = /^Inferno Demonlord (I|II|III|IV)$/.exec(enemyName || '');

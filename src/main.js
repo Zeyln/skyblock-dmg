@@ -1277,6 +1277,8 @@ function buildInput() {
   return {
     weapon: piece(state.weapon),
     // Mirrors the main dagger's upgrades (enchants, reforge, stars, books).
+    // For Voidgloom Hitshields shot down with a Terminator (the simulation uses its stats).
+    terminator: byId.get('TERMINATOR'),
     weapon2: second && byId.get(second) ? { ...piece(state.weapon), id: second, item: byId.get(second) } : null,
     armor: ARMOR_SLOTS.map((s) => piece(state.armor[s])),
     equipment: EQUIP_SLOTS.map((s) => piece(state.equipment[s.key])),
@@ -1554,6 +1556,8 @@ function renderSim(body, startDelay = 0) {
     hellion: 'Hellion Shield', split: 'Demonsplit', pillar: 'Fire Pillar', swap: 'Dagger swap',
     pups: 'Call the pups!',
     crystal: 'End Crystal', skulls: 'Summoned Skulls', reflect: 'Damage Shield',
+    boom: 'Thermonuclear',
+    clutch: 'Clutch',
   };
   const phases = s.phases || [];
   // Every phase the boss can have, so the list doesn't change with how the fight went.

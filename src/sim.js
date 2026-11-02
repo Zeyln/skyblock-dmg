@@ -1,10 +1,14 @@
 import { calculate } from './calc.js';
 import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
-  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_SHIELD_S,
+  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_ARROWS,
   LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S, PILLAR_REACH_S,
-  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, bossPhases,
+  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, WIPE_TIMER_S, bossPhases,
 } from './data/mechanics.js';
+
+// Phase thresholds that stop damage to the boss: Hitshield and beams (Voidgloom), Call the Pups (Sven),
+// Demonsplit (Demonlord), Web of Lies (Broodfather), the Mage Outlaw's 10M specials.
+const GATES = new Set(['shield', 'laser', 'pups', 'split', 'web', 'outlaw']);
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
 export const SIM_MAX_SECONDS = 600;
@@ -31,6 +35,29 @@ function rng(seed) {
  *   { t, hit, crit, ferocity (strikes), swipe (damage), bonuses: [names], damage, total, hp }
  */
 export function simulate(input, opts = {}) {
+  let s = fight(input, opts, new Set());
+  if (s.error) return s;
+  // Clutches: the last wipe mechanic the player stopped for before the kill is left alone instead, if
+  // the boss then dies before its timer runs out. Repeated while it works (the kill comes earlier,
+  // so an earlier one may be clutched too). Same seed, so each rerun is the same fight up to there.
+  while (s.killedAt !== null && !s.error) {
+    const last = s.mechanics.filter((m) => !m.clutch).at(-1);
+    if (!last) break;
+    const next = fight(input, opts, new Set([...s.mechanics.filter((m) => m.clutch).map((m) => m.id), last.id]));
+    if (next.killedAt === null || next.mechanics.some((m) => m.clutch && next.killedAt > m.deadline)) break;
+    s = next;
+  }
+  const names = { glyph: 'Yang Glyph', pillar: 'Fire Pillar', boom: 'Thermonuclear lightning' };
+  for (const m of s.mechanics.filter((x) => x.clutch)) {
+    const left = m.deadline - s.killedAt;
+    s.phases.push({ kind: 'clutch', start: m.land, end: s.killedAt, detail: `${names[m.kind]} · ${left.toFixed(1)} s left` });
+    s.notes.push(`Clutch: the boss died ${left.toFixed(1)} s before the ${names[m.kind]} would have wiped the fight, so it was left alone.`);
+  }
+  return s;
+}
+
+// One run of the fight. skip: the wipe mechanics (by id, e.g. glyph2) the player leaves alone.
+function fight(input, opts, skip) {
   const mode = opts.mode === 'kill' ? 'kill' : 'duration';
   const duration = Math.max(0.05, opts.duration || 30);
   const random = rng(opts.seed ?? 1);
@@ -45,6 +72,7 @@ export function simulate(input, opts = {}) {
   let broodOn = false;
   let hpPct = Math.min(100, Math.max(0, opts.enemyHpPct ?? 100));
   let hp = maxHp * hpPct / 100;
+  const startHp = hp;
   if (mode === 'kill' && !maxHp) {
     return { error: 'Set the target’s max HP (or pick an enemy) to simulate until it dies.' };
   }
@@ -97,16 +125,20 @@ export function simulate(input, opts = {}) {
 
   const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0 } };
   const events = [];
-  // Ferocity strikes land FEROCITY_DELAY_S after their hit: the hit's own event, then one for the
-  // strikes (hits are at least 0.25 s apart, so they always land before the next hit).
-  // hpBefore: the target's HP before the hit, for the HP between the two.
-  const record = (ev, feroPart = 0, hpBefore) => {
-    if (!ev.ferocity) { events.push(ev); return; }
-    const hitPart = ev.damage - feroPart;
-    events.push({ ...ev, ferocity: 0, damage: hitPart, total: ev.total - feroPart, hp: hpBefore === undefined ? ev.hp : Math.max(0, hpBefore - hitPart) });
-    events.push({ t: ev.t + FEROCITY_DELAY_S, feroOnly: true, hit: 0, crit: false, ferocity: ev.ferocity, swipe: 0, bonuses: [],
-      damage: feroPart, total: ev.total, hp: ev.hp, maxHp: ev.maxHp, target: ev.target, shielded: ev.shielded,
-      shieldLeft: ev.shieldLeftEnd ?? ev.shieldLeft });
+  // A hit's event, then one per Ferocity strike: the first FEROCITY_DELAY_S after the hit, the rest
+  // FEROCITY_GAP_S apart. Strikes can land after the next hit, so once the fight is done the events
+  // are put in time order and the damage total and each target's HP are counted along them (by
+  // tid: which target, tidStart: its HP when first hit).
+  const record = (ev, feroPart = 0) => {
+    if (!ev.ferocity) { events.push(ev); return [ev]; }
+    const from = events.length + 1;
+    events.push({ ...ev, ferocity: 0, damage: ev.damage - feroPart });
+    for (let k = 0; k < ev.ferocity; k++) {
+      events.push({ t: ev.t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S, feroOnly: true, hit: 0, crit: false, ferocity: 1, swipe: 0,
+        bonuses: [], damage: feroPart / ev.ferocity, maxHp: ev.maxHp, target: ev.target, tid: ev.tid, tidStart: ev.tidStart,
+        shielded: ev.shielded, sid: ev.sid });
+    }
+    return events.slice(from - 1); // the hit, then its strikes
   };
   const endTick = Math.round((mode === 'kill' ? SIM_MAX_SECONDS : duration) * TICKS_PER_SECOND);
   let total = 0;
@@ -131,16 +163,89 @@ export function simulate(input, opts = {}) {
     ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
     ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
   ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
-  // Hitshields: hit down with the weapon, or (T4, or above TERMINATOR_MP) shot down with a Terminator
-  // in a fixed time, during which there are no melee hits and the player does nothing else.
+  // Hitshields: hit down with the weapon, or (T4, or above TERMINATOR_MP) shot down with a Terminator,
+  // during which there are no melee hits and the player does nothing else. Its fire rate and Ferocity
+  // are the player's with the Terminator held (input.terminator: its item data, from the page; without
+  // it, the build's own stats).
   const terminator = !!boss?.shield && (boss.tier === 4 || (input.magicalPower || 0) > TERMINATOR_MP);
+  const termStats = terminator && input.terminator ? calculate({ ...input, weapon: { item: input.terminator } }).totals : base.totals;
+  const termShot = shortbowTicks(termStats.ATTACK_SPEED || 0) / TICKS_PER_SECOND;
+  // Soulcry cast on the katana just before the swap keeps its Ferocity on the Terminator (it lasts 4 s;
+  // the Fandom wiki: "The extra Ferocity applies when switching to another weapon").
+  const ability = WEAPON_ABILITIES[input.weapon?.item?.id];
+  const soulcry = ability && input.weapon.abilityOn !== false && ability.families.some((f) => input.target?.families?.includes(f))
+    ? ability.stats.FEROCITY || 0 : 0;
+  const termFero = Math.min(FEROCITY_CAP, Math.max(0, (termStats.FEROCITY || 0) + (input.terminator ? soulcry : 0)));
   let shield = null;
   let shieldUntil = 0;
+  // The boss's Ferocity strike events still on their way. They come off its health with their hit;
+  // once a hit or strike crosses a phase threshold (GATES), the ones after it are absorbed: the boss
+  // is shielded, immune, protected, split or gone by the time they land.
+  let bossStrikes = [];
+  let gateAt = 0;
+  // cap (Voidgloom only): the damage that crosses it also stops at the line, so one hit can't jump
+  // past the next phase ("the player's damage is capped at the amount of damage it would take to
+  // activate the next phase", Apr 2024). Returns when the line is crossed: the hit's time, or the
+  // strike's that crosses it.
+  const absorbPast = (line, t, hitEv, cap) => {
+    let at = hp + bossStrikes.reduce((sum, e) => sum + e.damage, 0); // after the hits alone
+    let crossed = null;
+    if (at <= line) {
+      crossed = t;
+      if (cap) {
+        hitEv.damage -= line - at;
+        out.damage.hits -= line - at;
+        at = line;
+      }
+    }
+    for (const e of bossStrikes) {
+      if (crossed === null) {
+        at -= e.damage;
+        if (at <= line) {
+          crossed = e.t;
+          if (cap) {
+            e.damage -= line - at;
+            out.damage.ferocity -= line - at;
+            at = line;
+          }
+        }
+      } else {
+        out.damage.ferocity -= e.damage;
+        e.damage = 0;
+      }
+    }
+    hp = Math.max(0, at);
+    hpPct = hp / maxHp * 100;
+    bossStrikes = [];
+    return crossed ?? t;
+  };
   const raiseShield = (t) => {
-    if (!terminator) { shield = { left: boss.shield.hits, start: t }; return; }
-    const [lo, hi] = TERMINATOR_SHIELD_S;
-    shieldUntil = t + lo + random() * (hi - lo);
-    phases.push({ kind: 'shield', start: t, end: shieldUntil });
+    const hits = boss.shield.hits;
+    // By hand: each hit and each of its Ferocity strikes (landing one by one) takes a hit off; it
+    // breaks at the one that takes the last (breakAt, once enough are on their way).
+    if (!terminator) { shield = { hits, start: t, times: [], breakAt: null }; return; }
+    // Shot by shot at the ground under the boss: 3 arrows, each explosion a hit, then its Ferocity
+    // strikes one by one. Shooting stops once the strikes on their way break it before the next shot.
+    const shots = [];
+    const times = [];
+    let at = t;
+    let breakAt = Infinity;
+    for (;;) {
+      shots.push(at);
+      for (let a = 0; a < TERMINATOR_ARROWS; a++) {
+        times.push(at);
+        const strikes = Math.floor(termFero / 100) + (random() * 100 < termFero % 100 ? 1 : 0);
+        for (let k = 0; k < strikes; k++) times.push(at + FEROCITY_DELAY_S + k * FEROCITY_GAP_S);
+      }
+      times.sort((a, b) => a - b);
+      if (times.length >= hits) breakAt = times[hits - 1];
+      if (breakAt <= at + termShot) break;
+      at += termShot;
+    }
+    shieldUntil = breakAt;
+    // left: the hits left after each hit or strike, for the nametag.
+    const left = times.slice(0, hits).map((x, i) => [x, hits - i - 1]);
+    phases.push({ kind: 'shield', start: t, end: shieldUntil, shots, left });
     blocked.push([t, shieldUntil]);
     playerBusy.push([t, shieldUntil]);
   };
@@ -148,6 +253,13 @@ export function simulate(input, opts = {}) {
   const blocked = []; // [start, end) windows with no hits: laser immunity, glyphs, heads
   // The player's own pauses go one after another: a new one starts once any earlier one is over.
   const playerBusy = [];
+  // Wipe mechanics as they land: { id, kind, land, deadline, clutch }.
+  const mechanics = [];
+  const wipe = (kind, land) => {
+    const id = kind + mechanics.filter((m) => m.kind === kind).length;
+    mechanics.push({ id, kind, land, deadline: land + WIPE_TIMER_S[kind], clutch: skip.has(id) });
+    return skip.has(id);
+  };
   const pause = (kind, start, length, phaseStart = start) => {
     for (const [s, e] of playerBusy) if (start >= s && start < e) start = e;
     playerBusy.push([start, start + length]);
@@ -184,6 +296,10 @@ export function simulate(input, opts = {}) {
     if (splitPhase) phases.push(splitPhase);
   };
   let nextPillar = null;
+  let nextBoom = boss?.boom ? boss.boom.every : null;
+  // Natural regeneration: the boss heals between hits (bossMax a second × regen).
+  const bossMax = base.targetMaxHp || 0;
+  let regenAt = 0;
   const split = (t, f) => {
     // The boss's own HP stops at the threshold while its demons fight.
     hp = Math.max(hp, f * maxHp);
@@ -247,15 +363,15 @@ export function simulate(input, opts = {}) {
       if (outlaw.special) outlaw.queued++;
       else startSpecial(t);
     } else
-    if (kind === 'shield') raiseShield(t);
+    // A Hitshield due while the beams are up starts once they end (wiki), with no glyphs meanwhile.
+    if (kind === 'shield') raiseShield(phases.find((p) => p.kind === 'laser' && t >= p.start && t < p.end)?.end ?? t);
     else if (kind === 'split') split(t, f);
     else if (kind === 'pups') callPups(t, f);
     else if (kind === 'pillars') nextPillar = t + boss.pillars.hold;
     else if (kind === 'web') pause('web', t, WEB_SWAP_S + boss.webs.hits * sacShot);
     else if (kind === 'laser') {
-      const { vulnerable, immune } = boss.lasers;
-      phases.push({ kind: 'laser', start: t, end: t + vulnerable + immune });
-      blocked.push([t + vulnerable, t + vulnerable + immune]);
+      phases.push({ kind: 'laser', start: t, end: t + boss.lasers.immune });
+      blocked.push([t, t + boss.lasers.immune]);
     } else if (kind === 'glyphs') nextGlyph = t + boss.glyphs.hold;
     else if (kind === 'heads') nextHead = t;
   };
@@ -275,11 +391,17 @@ export function simulate(input, opts = {}) {
       pause('leap', nextLeap, LEAP_AIM_S);
       nextLeap += boss.leaps.every;
     }
+    if (shield?.breakAt != null && t >= shield.breakAt) {
+      phases.push({ kind: 'shield', start: shield.start, end: shield.breakAt });
+      if (nextGlyph !== null && nextGlyph < shield.breakAt) nextGlyph = shield.breakAt + boss.glyphs.hold;
+      shield = null;
+    }
     // A glyph lands: the player stops to break it (never while the shield is up; it waits for the shield).
     // (A glyph due while a Terminator-broken shield is up waits for it, plus the hold.)
     if (nextGlyph !== null && nextGlyph < shieldUntil && t >= nextGlyph) nextGlyph = shieldUntil + boss.glyphs.hold;
     if (nextGlyph !== null && t >= nextGlyph && !shield) {
-      pause('glyph', nextGlyph, GLYPH_BREAK_S[0] + random() * (GLYPH_BREAK_S[1] - GLYPH_BREAK_S[0]));
+      const breakS = GLYPH_BREAK_S[0] + random() * (GLYPH_BREAK_S[1] - GLYPH_BREAK_S[0]);
+      if (!wipe('glyph', nextGlyph)) pause('glyph', nextGlyph, breakS);
       nextGlyph += boss.glyphs.every;
     }
     // Heads spawn every few seconds; once HEAD_BATCH are up, the player looks at each in turn.
@@ -294,8 +416,14 @@ export function simulate(input, opts = {}) {
     }
     // A fire pillar lands: the player runs to it and breaks it with 8 hits.
     while (nextPillar !== null && t >= nextPillar) {
-      pause('pillar', nextPillar, PILLAR_REACH_S + boss.pillars.hits * ticksPerHit / TICKS_PER_SECOND);
+      if (!wipe('pillar', nextPillar)) pause('pillar', nextPillar, PILLAR_REACH_S + boss.pillars.hits * ticksPerHit / TICKS_PER_SECOND);
       nextPillar += boss.pillars.every;
+    }
+    // Atoned Horror's Thermonuclear: hit until hitUntil into the countdown, then out of range and back.
+    while (nextBoom !== null && t >= nextBoom) {
+      const b = boss.boom;
+      if (!wipe('boom', nextBoom)) pause('boom', nextBoom + b.hitUntil, b.out + b.barrage + b.back, nextBoom);
+      nextBoom += b.every;
     }
     // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
     // use the dagger whose family takes its attunement (swapping or toggling first if needed).
@@ -376,16 +504,11 @@ export function simulate(input, opts = {}) {
     if (crit) out.crits++;
     out.ferocity += strikes;
     if (shield) {
-      // The shield takes hits, not damage. Events carry the hits left (after the hit, then after its strikes).
-      const afterHit = Math.max(0, shield.left - 1);
-      shield.left -= 1 + strikes;
-      const left = Math.max(0, shield.left);
-      if (shield.left <= 0) {
-        phases.push({ kind: 'shield', start: shield.start, end: t });
-        shield = null;
-        if (nextGlyph !== null && nextGlyph < t) nextGlyph = t + boss.glyphs.hold;
-      }
-      record({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, shieldLeft: afterHit, shieldLeftEnd: left });
+      // The shield takes hits, not damage; hits until it breaks still count, even with strikes on their way.
+      shield.times.push(t);
+      for (let k = 0; k < strikes; k++) shield.times.push(t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S);
+      if (shield.times.length >= shield.hits) shield.breakAt = [...shield.times].sort((a, b) => a - b)[shield.hits - 1];
+      record({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, sid: shield, tid: 'boss', tidStart: startHp }, 0);
       tick += ticksPerHit;
       continue;
     }
@@ -409,7 +532,6 @@ export function simulate(input, opts = {}) {
     const dealt = hitDmg + feroPart + bolt + swipe;
     total += dealt;
     if (demon) {
-      const before = demon.hp;
       demon.hp = Math.max(0, demon.hp - dealt);
       const other = demons.list[1 - demons.active];
       if (demon.hp <= 0) {
@@ -431,12 +553,11 @@ export function simulate(input, opts = {}) {
           showSplit(t, other.name);
         }
       }
-      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name }, feroPart, before);
+      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name, tid: demon, tidStart: demon.maxHp }, feroPart);
       tick += step;
       continue;
     }
     if (pup) {
-      const before = pup.hp;
       pup.hp = Math.max(0, pup.hp - dealt);
       if (pup.hp <= 0) {
         const killed = pups.filter((p) => p.hp <= 0).length;
@@ -445,20 +566,31 @@ export function simulate(input, opts = {}) {
           showPups(t, null);
         } else showPups(t, `${killed} of ${pups.length} pups killed`);
       }
-      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup' }, feroPart, before);
+      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup', tid: pup, tidStart: pup.maxHp }, feroPart);
       tick += step;
       continue;
     }
-    const hpBefore = hp;
     if (maxHp) {
-      hp = Math.max(0, hp - dealt);
-      hpPct = hp / maxHp * 100;
+      bossStrikes = bossStrikes.filter((e) => e.t > t);
+      if (boss?.regen && !broodOn) hp = Math.min(maxHp, hp + boss.regen * maxHp * (t - regenAt));
+      regenAt = t;
+      hp -= dealt; // below 0 is fine until the strikes are settled
     }
     if (need && matched && ++attuneHits >= HELLION_SWITCH_HITS) {
       attuneHits = 0;
       attune = (attune + 1) % HELLION_ORDER.length;
     }
-    record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp, ...(broodOn ? { target: 'Conjoined Brood' } : {}) }, feroPart, hpBefore);
+    const struck = record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
+      ...(broodOn ? { target: 'Conjoined Brood', tid: 'brood', tidStart: maxHp } : { tid: 'boss', tidStart: startHp }) }, feroPart);
+    if (maxHp) {
+      bossStrikes.push(...struck.slice(1));
+      bossStrikes.sort((a, b) => a.t - b.t);
+      // A phase starts at the hit or strike that crosses its line; later strikes are absorbed.
+      const gate = !demons && !pups && triggers.find((x) => GATES.has(x.kind) && hp <= x.f * maxHp);
+      gateAt = gate ? absorbPast(gate.f * maxHp, t, struck[0], gate.kind === 'shield' || gate.kind === 'laser') : t;
+      hp = Math.max(0, hp);
+      hpPct = hp / maxHp * 100;
+    }
     if (maxHp && hp <= 0 && boss?.brood && !broodOn) {
       // Till Death Do Us Part: the Conjoined Brood takes over with more health and only its passives.
       broodOn = true;
@@ -471,21 +603,52 @@ export function simulate(input, opts = {}) {
       continue;
     }
     if (maxHp && hp <= 0) {
-      // Killed by the hit itself, or only by its Ferocity strikes a moment later.
-      killedAt = strikes && hpBefore - (dealt - feroPart) > 0 ? t + FEROCITY_DELAY_S : t;
+      killedAt = t; // moved to the hit or strike that actually brings it to 0, below
       break;
     }
     while (!demons && !pups && triggers.length && hp <= triggers[0].f * maxHp) {
       const { kind, f } = triggers.shift();
-      trigger(kind, t, f);
+      trigger(kind, Math.max(t, gateAt), f);
     }
     tick += step;
   }
 
+  // Time order (strikes after later hits), then the running total and each target's HP along it. The
+  // kill is the event that brings the last target to 0; anything after it never lands.
+  events.sort((a, b) => a.t - b.t);
+  const hpOf = new Map();
+  const lastAt = new Map();
+  const shieldHits = new Map();
+  let running = 0;
+  for (const e of events) {
+    if (e.sid) {
+      const left = (shieldHits.has(e.sid) ? shieldHits.get(e.sid) : e.sid.hits) - 1;
+      shieldHits.set(e.sid, left);
+      e.shieldLeft = Math.max(0, left);
+      delete e.sid;
+    }
+    running += e.damage;
+    e.total = running;
+    let before = hpOf.has(e.tid) ? hpOf.get(e.tid) : e.tidStart;
+    if (boss?.regen && e.tid === 'boss' && before > 0) before = Math.min(bossMax, before + boss.regen * bossMax * (e.t - (lastAt.get(e.tid) ?? 0)));
+    lastAt.set(e.tid, e.t);
+    e.hp = Math.max(0, before - e.damage);
+    hpOf.set(e.tid, e.hp);
+  }
+  const lastTid = broodOn ? 'brood' : 'boss';
+  const fatal = killedAt === null ? -1 : events.findIndex((e) => e.tid === lastTid && e.hp <= 0);
+  if (fatal >= 0) killedAt = events[fatal].t;
+
   const limit = mode === 'kill' ? SIM_MAX_SECONDS : duration;
   const despawned = killedAt === null && boss?.despawnS < limit;
   const seconds = killedAt ?? (despawned ? boss.despawnS : limit);
-  if (shield) phases.push({ kind: 'shield', start: shield.start, end: seconds });
+  // Strikes still pending at the kill, the despawn or the end of the time never land.
+  if (fatal >= 0) events.length = fatal + 1;
+  else while (events.length && events.at(-1).t > seconds + 1e-9) events.pop();
+  total = events.length ? events.at(-1).total : 0;
+  const lastHp = [...events].reverse().find((e) => e.tid === lastTid);
+  if (lastHp) hp = lastHp.hp;
+  if (shield) phases.push({ kind: 'shield', start: shield.start, end: Math.min(shield.breakAt ?? seconds, seconds) });
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
   if (despawned) notes.push(`The boss despawned after ${boss.despawnS / 60} minutes: the Slayer quest failed.`);
@@ -493,8 +656,9 @@ export function simulate(input, opts = {}) {
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
-  if (terminator) notes.push(`Hitshields are broken with a Terminator (explosive arrows) in ${TERMINATOR_SHIELD_S.join('–')} s.`);
+  if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
   if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
+  if (boss?.boom) notes.push(`Boss phases: Thermonuclear every ${boss.boom.every} s (assumed from spawn): hits until ${boss.boom.hitUntil} s into its 5 s countdown, then ${(boss.boom.out + boss.boom.barrage + boss.boom.back).toFixed(1)} s out of range (assumed); natural regeneration of 1/1000 of max health a second; TNT heals are left out (dodged).`);
   if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.webs ? `; Web of Lies costs ${WEB_SWAP_S} s to swap and re-engage plus ${boss.webs.hits} shortbow shots at the egg sacs` : ''}${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
   if (boss?.split) {
     notes.push(`Boss phases: dagger swaps take ${DAGGER_SWAP_S * 1000} ms${boss.pillars ? `; fire pillars take ${PILLAR_REACH_S * 1000} ms to reach plus ${boss.pillars.hits} hits` : ''}; fire pits and demon beams are dodged; despawn after 4 minutes is assumed.`);
@@ -503,15 +667,16 @@ export function simulate(input, opts = {}) {
   if (!boss && input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {
-    mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp: maxHp * Math.min(100, Math.max(0, opts.enemyHpPct ?? 100)) / 100,
+    mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp,
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
-    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes,
+    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics,
     // Every phase this boss can have, whether or not this fight got to it (for the indicator).
     phaseKinds: !boss ? [] : [
       boss.shield && 'shield', boss.lasers && 'laser', boss.glyphs && 'glyph', boss.heads && 'heads',
       boss.leaps && 'leap', boss.webs && 'web', boss.brood && 'brood',
       boss.hellion && 'hellion', boss.split && 'split', boss.pillars && 'pillar', boss.hellion && weapons.length > 1 && 'swap',
       boss.pups && 'pups', ...(boss.outlaw ? ['crystal', 'skulls', 'reflect'] : []),
+      boss.boom && 'boom', (boss.glyphs || boss.pillars || boss.boom) && 'clutch',
     ].filter(Boolean),
   };
 }
