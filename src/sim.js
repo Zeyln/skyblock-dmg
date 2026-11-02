@@ -1,11 +1,11 @@
 import { calculate } from './calc.js';
 import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
-  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, GLYPH_BREAK_S, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_ARROWS,
-  LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S, PILLAR_REACH_S,
-  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, WIPE_TIMER_S, enemyBlocks,
+  FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_ARROWS,
+  LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S,
+  DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, enemyBlocks,
 } from './data/mechanics.js';
-import { legacyBoss, phaseKinds, despawnSeconds, regenPerSecond } from './bossMechanics.js';
+import { legacyBoss, phaseKinds, despawnSeconds, regenPerSecond, blockNotes } from './bossMechanics.js';
 
 // Phase thresholds that stop damage to the boss: Hitshield and beams (Voidgloom), Call the Pups (Sven),
 // Demonsplit (Demonlord), Web of Lies (Broodfather), the Mage Outlaw's 10M specials.
@@ -48,11 +48,10 @@ export function simulate(input, opts = {}) {
     if (next.killedAt === null || next.mechanics.some((m) => m.clutch && next.killedAt > m.deadline)) break;
     s = next;
   }
-  const names = { glyph: 'Yang Glyph', pillar: 'Fire Pillar', boom: 'Thermonuclear lightning' };
   for (const m of s.mechanics.filter((x) => x.clutch)) {
     const left = m.deadline - s.killedAt;
-    s.phases.push({ kind: 'clutch', start: m.land, end: s.killedAt, detail: `${names[m.kind]} · ${left.toFixed(1)} s left` });
-    s.notes.push(`Clutch: the boss died ${left.toFixed(1)} s before the ${names[m.kind]} would have wiped the fight, so it was left alone.`);
+    s.phases.push({ kind: 'clutch', start: m.land, end: s.killedAt, detail: `${m.name} · ${left.toFixed(1)} s left` });
+    s.notes.push(`Clutch: the boss died ${left.toFixed(1)} s before the ${m.name} would have wiped the fight, so it was left alone.`);
   }
   return s;
 }
@@ -157,15 +156,19 @@ function fight(input, opts, skip) {
   const regen = regenPerSecond(blocks);
   const phases = [];
   const startFrac = hp / maxHp;
+  // Wipe timers (wipeTimer blocks): next is when the next one lands (null: not started yet). One that
+  // starts below an HP fraction the fight already starts under runs from the start.
+  const timers = blocks.filter((b) => b.kind === 'wipeTimer').map((b) => ({
+    b, next: b.at != null ? b.at + b.delay : startFrac <= b.from ? b.delay : null,
+  }));
   const triggers = boss ? [
     ...(boss.shield?.at || []).filter((f) => f < 1).map((f) => ({ f, kind: 'shield' })),
     ...(boss.lasers?.at || []).map((f) => ({ f, kind: 'laser' })),
     ...(boss.webs?.at || []).map((f) => ({ f, kind: 'web' })),
     ...(boss.split?.at || []).map((f) => ({ f, kind: 'split' })),
-    ...(boss.pillars ? [{ f: boss.pillars.from, kind: 'pillars' }] : []),
     ...(boss.pups ? [{ f: boss.pups.at, kind: 'pups' }] : []),
     ...(boss.outlaw ? Array.from({ length: boss.outlaw.steps - 1 }, (_, i) => ({ f: (i + 1) / boss.outlaw.steps, kind: 'outlaw' })) : []),
-    ...(boss.glyphs ? [{ f: boss.glyphs.from, kind: 'glyphs' }] : []),
+    ...timers.filter((x) => x.b.from != null).map((timer) => ({ f: timer.b.from, kind: 'timer', timer })),
     ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
   ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
   // Hitshields: hit down with the weapon, or (T4, or above TERMINATOR_MP) shot down with a Terminator,
@@ -254,17 +257,19 @@ function fight(input, opts, skip) {
     blocked.push([t, shieldUntil]);
     playerBusy.push([t, shieldUntil]);
   };
-  let nextGlyph = boss?.glyphs && startFrac <= boss.glyphs.from ? boss.glyphs.hold : null;
   const blocked = []; // [start, end) windows with no hits: laser immunity, glyphs, heads
   // The player's own pauses go one after another: a new one starts once any earlier one is over.
   const playerBusy = [];
-  // Wipe mechanics as they land: { id, kind, land, deadline, clutch }.
+  // Wipe mechanics as they land: { id, kind (its row), name, land, deadline, clutch }.
   const mechanics = [];
-  const wipe = (kind, land) => {
-    const id = kind + mechanics.filter((m) => m.kind === kind).length;
-    mechanics.push({ id, kind, land, deadline: land + WIPE_TIMER_S[kind], clutch: skip.has(id) });
+  const wipe = (b, land) => {
+    const id = b.row + mechanics.filter((m) => m.kind === b.row).length;
+    mechanics.push({ id, kind: b.row, name: b.name || b.label, land, deadline: land + b.wipe, clutch: skip.has(id) });
     return skip.has(id);
   };
+  // How long the player spends dealing with one: fixed, random in [min, max], or reaching it and hitting it.
+  const stopFor = ({ stop }) => (Array.isArray(stop) ? stop[0] + random() * (stop[1] - stop[0])
+    : typeof stop === 'object' ? stop.reach + stop.hits * ticksPerHit / TICKS_PER_SECOND : stop);
   const pause = (kind, start, length, phaseStart = start) => {
     for (const [s, e] of playerBusy) if (start >= s && start < e) start = e;
     playerBusy.push([start, start + length]);
@@ -300,8 +305,6 @@ function fight(input, opts, skip) {
     splitPhase = name ? { kind: 'split', start: t, end: Infinity, detail: name } : null;
     if (splitPhase) phases.push(splitPhase);
   };
-  let nextPillar = null;
-  let nextBoom = boss?.boom ? boss.boom.every : null;
   // Revenant Enrage: on a clock, and tanked, so only shown.
   if (boss?.enrage) {
     const { at, mad, enraged } = boss.enrage;
@@ -369,7 +372,7 @@ function fight(input, opts, skip) {
     } else startShield(t);
   };
   if (outlaw) startCrystal(0);
-  const trigger = (kind, t, f) => {
+  const trigger = (kind, t, f, timer) => {
     if (kind === 'outlaw') {
       if (outlaw.special) outlaw.queued++;
       else startSpecial(t);
@@ -378,12 +381,11 @@ function fight(input, opts, skip) {
     if (kind === 'shield') raiseShield(phases.find((p) => p.kind === 'laser' && t >= p.start && t < p.end)?.end ?? t);
     else if (kind === 'split') split(t, f);
     else if (kind === 'pups') callPups(t, f);
-    else if (kind === 'pillars') nextPillar = t + boss.pillars.hold;
     else if (kind === 'web') pause('web', t, WEB_SWAP_S + boss.webs.hits * sacShot);
     else if (kind === 'laser') {
       phases.push({ kind: 'laser', start: t, end: t + boss.lasers.immune });
       blocked.push([t, t + boss.lasers.immune]);
-    } else if (kind === 'glyphs') nextGlyph = t + boss.glyphs.hold;
+    } else if (kind === 'timer') timer.next = t + timer.b.delay;
     else if (kind === 'heads') nextHead = t;
   };
 
@@ -404,16 +406,18 @@ function fight(input, opts, skip) {
     }
     if (shield?.breakAt != null && t >= shield.breakAt) {
       phases.push({ kind: 'shield', start: shield.start, end: shield.breakAt });
-      if (nextGlyph !== null && nextGlyph < shield.breakAt) nextGlyph = shield.breakAt + boss.glyphs.hold;
+      for (const x of timers) if (x.b.afterShield && x.next !== null && x.next < shield.breakAt) x.next = shield.breakAt + x.b.delay;
       shield = null;
     }
-    // A glyph lands: the player stops to break it (never while the shield is up; it waits for the shield).
-    // (A glyph due while a Terminator-broken shield is up waits for it, plus the hold.)
-    if (nextGlyph !== null && nextGlyph < shieldUntil && t >= nextGlyph) nextGlyph = shieldUntil + boss.glyphs.hold;
-    if (nextGlyph !== null && t >= nextGlyph && !shield) {
-      const breakS = GLYPH_BREAK_S[0] + random() * (GLYPH_BREAK_S[1] - GLYPH_BREAK_S[0]);
-      if (!wipe('glyph', nextGlyph)) pause('glyph', nextGlyph, breakS);
-      nextGlyph += boss.glyphs.every;
+    // Wipe timers land: the player keeps hitting for hitFor, then deals with it (unless clutched).
+    // One that waits for the Hitshield (afterShield) lands after it is down, plus its delay.
+    for (const x of timers) {
+      if (x.b.afterShield && x.next !== null && x.next < shieldUntil && t >= x.next) x.next = shieldUntil + x.b.delay;
+      while (x.next !== null && t >= x.next && !(x.b.afterShield && shield)) {
+        const stop = stopFor(x.b);
+        if (!wipe(x.b, x.next)) pause(x.b.row, x.next + (x.b.hitFor || 0), stop, x.next);
+        x.next += x.b.every;
+      }
     }
     // Heads spawn every few seconds; once HEAD_BATCH are up, the player looks at each in turn.
     // The indicator stays lit from the first head of a batch until the last one is gone.
@@ -424,17 +428,6 @@ function fight(input, opts, skip) {
         heads = [];
       }
       nextHead += boss.heads.every;
-    }
-    // A fire pillar lands: the player runs to it and breaks it with 8 hits.
-    while (nextPillar !== null && t >= nextPillar) {
-      if (!wipe('pillar', nextPillar)) pause('pillar', nextPillar, PILLAR_REACH_S + boss.pillars.hits * ticksPerHit / TICKS_PER_SECOND);
-      nextPillar += boss.pillars.every;
-    }
-    // Atoned Horror's Thermonuclear: hit until hitUntil into the countdown, then out of range and back.
-    while (nextBoom !== null && t >= nextBoom) {
-      const b = boss.boom;
-      if (!wipe('boom', nextBoom)) pause('boom', nextBoom + b.hitUntil, b.out + b.barrage + b.back, nextBoom);
-      nextBoom += b.every;
     }
     // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
     // use the dagger whose family takes its attunement (swapping or toggling first if needed).
@@ -618,8 +611,8 @@ function fight(input, opts, skip) {
       break;
     }
     while (!demons && !pups && triggers.length && hp <= triggers[0].f * maxHp) {
-      const { kind, f } = triggers.shift();
-      trigger(kind, Math.max(t, gateAt), f);
+      const { kind, f, timer } = triggers.shift();
+      trigger(kind, Math.max(t, gateAt), f, timer);
     }
     tick += step;
   }
@@ -669,12 +662,12 @@ function fight(input, opts, skip) {
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
-  if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
+  if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; a head every 6 s, looked at 0.5 s each once two are up.');
+  for (const n of blockNotes(blocks)) notes.push(`Boss phases: ${n}.`);
   if (boss?.enrage) notes.push(`Boss phases: Enrage (Mad at ${boss.enrage.at} s, Enraged ${boss.enrage.mad} s later for ${boss.enrage.enraged} s) is tanked, so it costs no time.`);
-  if (boss?.boom) notes.push(`Boss phases: Thermonuclear every ${boss.boom.every} s (assumed from spawn): hits until ${boss.boom.hitUntil} s into its 5 s countdown, then ${(boss.boom.out + boss.boom.barrage + boss.boom.back).toFixed(1)} s out of range (assumed); natural regeneration of 1/1000 of max health a second; TNT heals are left out (dodged).`);
   if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.webs ? `; Web of Lies costs ${WEB_SWAP_S} s to swap and re-engage plus ${boss.webs.hits} shortbow shots at the egg sacs` : ''}${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
   if (boss?.split) {
-    notes.push(`Boss phases: dagger swaps take ${DAGGER_SWAP_S * 1000} ms${boss.pillars ? `; fire pillars take ${PILLAR_REACH_S * 1000} ms to reach plus ${boss.pillars.hits} hits` : ''}; fire pits and demon beams are dodged; despawn after 4 minutes is assumed.`);
+    notes.push(`Boss phases: dagger swaps take ${DAGGER_SWAP_S * 1000} ms; fire pits and demon beams are dodged; despawn after 4 minutes is assumed.`);
     if (boss.hellion && weapons.length < 2) notes.push('Only one dagger: hits on the wrong attunement lose 99% of their damage.');
   }
   if (!boss && input.target?.boss) notes.push('Boss damage caps are not modelled.');

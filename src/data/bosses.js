@@ -26,9 +26,8 @@
 //     Ferocity isn't divided).
 export const GLYPH_BREAK_S = [0.5, 0.75];
 // Wipe timers (wiki): a Yang Glyph not broken within 5 s of landing, or a Fire Pillar within 7 s, deals
-// 1000 × Max Health as True Damage to everyone fighting the boss. A clutch: when the boss dies before
-// the timer runs out anyway, the player keeps hitting and leaves it alone.
-export const WIPE_TIMER_S = { glyph: 5, pillar: 7, boom: 5 };
+// 1000 × Max Health as True Damage to everyone fighting the boss (the wipeTimer blocks' `wipe`). A
+// clutch: when the boss dies before the timer runs out anyway, the player keeps hitting and leaves it alone.
 export const TERMINATOR_MP = 900;
 export const TERMINATOR_ARROWS = 3;
 export const HEAD_LOOK_S = 0.5;
@@ -126,7 +125,6 @@ export const regen = (perSecond) => ({ kind: 'regen', perSecond });
 // { hits, at: [HP fractions; 1 = on spawn], feroDivisor (while down), terminator: always shot down with one }
 export const hitshield = block('hitshield');
 export const beams = block('beams'); // { at, immune (s) }
-export const yangGlyphs = block('yangGlyphs'); // { from, every, hold }
 export const nukekubiHeads = block('nukekubiHeads'); // { from, every }
 export const backstab = block('backstab'); // { every }
 export const webOfLies = block('webOfLies'); // { at, hits }
@@ -134,10 +132,18 @@ export const conjoinedBrood = block('conjoinedBrood'); // { hpMult }
 export const hellionShield = block('hellionShield');
 export const daggerSwaps = (seconds) => ({ kind: 'daggerSwaps', seconds }); // swapping or toggling attunement
 export const demonsplit = block('demonsplit'); // { at, demonHp }
-export const firePillars = block('firePillars'); // { from, every, hold, hits }
 export const callThePups = block('callThePups'); // { at, count, every, hpFrac }
 export const outlawSpecials = block('outlawSpecials'); // OUTLAW
-export const thermonuclear = block('thermonuclear'); // ATONED_BOOM
+// Something that lands on a timer and wipes the fight unless the player deals with it in time (or
+// the boss dies first: a clutch).
+//   row, label: its indicator row; name: what notes call it (default label); tag: nametag status
+//   from: starts once the boss is below this HP fraction, or at: seconds from spawn
+//   delay: from then to the first one; every: seconds between them
+//   hitFor: seconds the player keeps hitting after one lands; stop: seconds spent dealing with it,
+//     [min, max] (random) or { reach, hits } (reach it, then that many hits)
+//   wipe: seconds after landing before it wipes; afterShield: never lands while a Hitshield is up
+//   note: a line for the fight's notes
+export const wipeTimer = block('wipeTimer');
 export const enrage = block('enrage'); // REVENANT_ENRAGE
 
 // Shared blocks.
@@ -149,17 +155,28 @@ export const voidgloomBlocks = (t) => [
   LONG_DESPAWN,
   hitshield({ hits: [15, 30, 60, 100][t], at: [1, 2 / 3, 1 / 3], feroDivisor: 4, terminator: t === 3 }),
   t === 3 && beams({ at: [5 / 6, 1 / 2, 1 / 6], immune: 8 }),
-  t >= 1 && yangGlyphs({ from: t === 1 ? 1 / 2 : 2 / 3, every: 8, hold: 2 }),
+  t >= 1 && wipeTimer({
+    row: 'glyph', label: 'Yang Glyph', from: t === 1 ? 1 / 2 : 2 / 3, delay: 2, every: 8, stop: GLYPH_BREAK_S, wipe: 5,
+    afterShield: true, note: 'a Yang Glyph every 8 s (unconfirmed for T3+), 0.5–0.75 s to break',
+  }),
   t >= 2 && nukekubiHeads({ from: 1 / 3, every: 6 }),
 ].filter(Boolean);
 export const revenantBlocks = (t) => [SLAYER_DESPAWN, t >= 2 && enrage(REVENANT_ENRAGE)].filter(Boolean);
-export const ATONED_BLOCKS = [SLAYER_DESPAWN, regen(ATONED_REGEN), thermonuclear(ATONED_BOOM)];
+export const ATONED_BLOCKS = [SLAYER_DESPAWN, regen(ATONED_REGEN), wipeTimer({
+  row: 'boom', label: 'Thermonuclear', name: 'Thermonuclear lightning', tag: ['Boom!', 'c', true],
+  at: 0, delay: ATONED_BOOM.every, every: ATONED_BOOM.every, hitFor: ATONED_BOOM.hitUntil,
+  stop: ATONED_BOOM.out + ATONED_BOOM.barrage + ATONED_BOOM.back, wipe: 5,
+  note: 'Thermonuclear every 30 s (assumed from spawn): hits for 4.5 s of its 5 s countdown, then 2 s out of range (assumed); TNT heals are left out (dodged)',
+})];
 export const svenBlocks = (t) => (t >= 2 ? [callThePups({ at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 })] : []);
 export const demonlordBlocks = (t) => [
   LONG_DESPAWN,
   t >= 1 && hellionShield(),
   demonsplit({ at: t <= 1 ? [1 / 2] : [2 / 3, 1 / 3], demonHp: [500e3, 1.75e6, 5e6, 10e6][t] }),
-  t >= 1 && firePillars({ from: t === 1 ? 1 / 2 : 2 / 3, every: 20, hold: 3.5, hits: 8 }),
+  t >= 1 && wipeTimer({
+    row: 'pillar', label: 'Fire Pillar', from: t === 1 ? 1 / 2 : 2 / 3, delay: 3.5, every: 20, stop: { reach: PILLAR_REACH_S, hits: 8 }, wipe: 7,
+    note: 'a Fire Pillar every 20 s, 500 ms to reach plus 8 hits',
+  }),
   t >= 1 && daggerSwaps(DAGGER_SWAP_S),
 ].filter(Boolean);
 export const broodfatherBlocks = (t) => [
