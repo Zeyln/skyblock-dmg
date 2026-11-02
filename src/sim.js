@@ -5,11 +5,7 @@ import {
   LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S,
   DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, enemyBlocks,
 } from './data/mechanics.js';
-import { legacyBoss, phaseKinds, despawnSeconds, regenPerSecond, blockNotes } from './bossMechanics.js';
-
-// Phase thresholds that stop damage to the boss: Hitshield and beams (Voidgloom), Call the Pups (Sven),
-// Demonsplit (Demonlord), Web of Lies (Broodfather), the Mage Outlaw's 10M specials.
-const GATES = new Set(['shield', 'laser', 'pups', 'split', 'web', 'outlaw']);
+import { legacyBoss, phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines } from './bossMechanics.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
 export const SIM_MAX_SECONDS = 600;
@@ -153,6 +149,11 @@ function fight(input, opts, skip) {
   const blocks = maxHp ? enemyBlocks(input.target?.enemy) : [];
   const boss = legacyBoss(blocks);
   const despawnS = despawnSeconds(blocks);
+  const blk = (kind) => blocks.find((b) => b.kind === kind) || null;
+  const shieldB = blk('hitshield');
+  const splitB = blk('demonsplit');
+  const pupsB = blk('callThePups');
+  const outlawB = blk('outlawSpecials');
   const regen = regenPerSecond(blocks);
   const phases = [];
   const startFrac = hp / maxHp;
@@ -161,21 +162,13 @@ function fight(input, opts, skip) {
   const timers = blocks.filter((b) => b.kind === 'wipeTimer').map((b) => ({
     b, next: b.at != null ? b.at + b.delay : startFrac <= b.from ? b.delay : null,
   }));
-  const triggers = boss ? [
-    ...(boss.shield?.at || []).filter((f) => f < 1).map((f) => ({ f, kind: 'shield' })),
-    ...(boss.lasers?.at || []).map((f) => ({ f, kind: 'laser' })),
-    ...(boss.webs?.at || []).map((f) => ({ f, kind: 'web' })),
-    ...(boss.split?.at || []).map((f) => ({ f, kind: 'split' })),
-    ...(boss.pups ? [{ f: boss.pups.at, kind: 'pups' }] : []),
-    ...(boss.outlaw ? Array.from({ length: boss.outlaw.steps - 1 }, (_, i) => ({ f: (i + 1) / boss.outlaw.steps, kind: 'outlaw' })) : []),
-    ...timers.filter((x) => x.b.from != null).map((timer) => ({ f: timer.b.from, kind: 'timer', timer })),
-    ...(boss.heads ? [{ f: boss.heads.from, kind: 'heads' }] : []),
-  ].filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f) : [];
+  // The HP lines the mechanics act at (each definition's lines), highest first.
+  const triggers = hpLines(blocks).filter((x) => x.f < startFrac).sort((a, b) => b.f - a.f);
   // Hitshields: hit down with the weapon, or (T4, or above TERMINATOR_MP) shot down with a Terminator,
   // during which there are no melee hits and the player does nothing else. Its fire rate and Ferocity
   // are the player's with the Terminator held (input.terminator: its item data, from the page; without
   // it, the build's own stats).
-  const terminator = !!boss?.shield && (boss.tier === 4 || (input.magicalPower || 0) > TERMINATOR_MP);
+  const terminator = !!shieldB && (!!shieldB.terminator || (input.magicalPower || 0) > TERMINATOR_MP);
   const termStats = terminator && input.terminator ? calculate({ ...input, weapon: { item: input.terminator } }).totals : base.totals;
   const termShot = shortbowTicks(termStats.ATTACK_SPEED || 0) / TICKS_PER_SECOND;
   // Soulcry cast on the katana just before the swap keeps its Ferocity on the Terminator (it lasts 4 s;
@@ -187,7 +180,7 @@ function fight(input, opts, skip) {
   let shield = null;
   let shieldUntil = 0;
   // The boss's Ferocity strike events still on their way. They come off its health with their hit;
-  // once a hit or strike crosses a phase threshold (GATES), the ones after it are absorbed: the boss
+  // once a hit or strike crosses a phase line (a gate), the ones after it are absorbed: the boss
   // is shielded, immune, protected, split or gone by the time they land.
   let bossStrikes = [];
   let gateAt = 0;
@@ -228,7 +221,7 @@ function fight(input, opts, skip) {
     return crossed ?? t;
   };
   const raiseShield = (t) => {
-    const hits = boss.shield.hits;
+    const hits = shieldB.hits;
     // By hand: each hit and each of its Ferocity strikes (landing one by one) takes a hit off; it
     // breaks at the one that takes the last (breakAt, once enough are on their way).
     if (!terminator) { shield = { hits, start: t, times: [], breakAt: null }; return; }
@@ -278,7 +271,7 @@ function fight(input, opts, skip) {
   };
   let nextHead = null;
   let heads = []; // spawn times of heads still alive
-  if (boss?.shield && startFrac >= 1) raiseShield(0);
+  if (shieldB?.at.includes(1) && startFrac >= 1) raiseShield(0);
   // Backstab leaps: the player re-aims for a moment after each.
   let nextLeap = boss?.leaps ? boss.leaps.every : null;
   // Web of Lies: swap to a shortbow and shoot the egg sacs (Piercing hits them all), no melee meanwhile.
@@ -318,7 +311,7 @@ function fight(input, opts, skip) {
     // The boss's own HP stops at the threshold while its demons fight.
     hp = Math.max(hp, f * maxHp);
     hpPct = hp / maxHp * 100;
-    const demonHp = boss.split.demonHp;
+    const demonHp = splitB.demonHp;
     demons = {
       active: 0,
       list: [{ name: 'Quazii', attunes: ['SPIRIT', 'CRYSTAL'] }, { name: 'Typhoeus', attunes: ['ASHEN', 'AURIC'] }]
@@ -338,7 +331,7 @@ function fight(input, opts, skip) {
   const callPups = (t, f) => {
     hp = Math.max(hp, f * maxHp);
     hpPct = hp / maxHp * 100;
-    const { count, every, hpFrac } = boss.pups;
+    const { count, every, hpFrac } = pupsB;
     pups = Array.from({ length: count }, (_, i) => ({ at: t + i * every, hp: maxHp * hpFrac, maxHp: maxHp * hpFrac }));
     showPups(t, `0 of ${count} pups killed`);
   };
@@ -346,20 +339,20 @@ function fight(input, opts, skip) {
   // it loses another 1/7 of its health. Thresholds passed during a special phase wait for it to end.
   // The boss's picks use their own random sequence, so they don't change with the player's build.
   const bossRandom = rng(((opts.seed ?? 1) * 7919 + 13) >>> 0);
-  const outlaw = boss?.outlaw ? { special: null, queued: 0, crystal: null } : null;
+  const outlaw = outlawB ? { special: null, queued: 0, crystal: null } : null;
   const startCrystal = (t) => {
-    outlaw.crystal = { kind: 'crystal', start: t, end: t + boss.outlaw.crystal };
+    outlaw.crystal = { kind: 'crystal', start: t, end: t + outlawB.crystal };
     phases.push(outlaw.crystal);
   };
   const startShield = (t) => {
-    const o = boss.outlaw;
+    const o = outlawB;
     const [name, length] = o.shield.attacks[Math.floor(bossRandom() * o.shield.attacks.length)];
     outlaw.special = { end: t + length + o.shield.linger };
     phases.push({ kind: 'reflect', start: t, end: outlaw.special.end, detail: name });
     blocked.push([t, outlaw.special.end]); // the shield reflects damage, so the player doesn't hit
   };
   const startSpecial = (t) => {
-    const o = boss.outlaw;
+    const o = outlawB;
     if (outlaw.crystal) outlaw.crystal.end = Math.min(outlaw.crystal.end, t);
     outlaw.crystal = null;
     // Skulls, or a shield with one of its two attacks: three outcomes, equally likely.
@@ -372,21 +365,23 @@ function fight(input, opts, skip) {
     } else startShield(t);
   };
   if (outlaw) startCrystal(0);
-  const trigger = (kind, t, f, timer) => {
-    if (kind === 'outlaw') {
+  // What each mechanic does when the boss's health falls past one of its lines, by block kind.
+  const ON_LINE = {
+    outlawSpecials: (t) => {
       if (outlaw.special) outlaw.queued++;
       else startSpecial(t);
-    } else
+    },
     // A Hitshield due while the beams are up starts once they end (wiki), with no glyphs meanwhile.
-    if (kind === 'shield') raiseShield(phases.find((p) => p.kind === 'laser' && t >= p.start && t < p.end)?.end ?? t);
-    else if (kind === 'split') split(t, f);
-    else if (kind === 'pups') callPups(t, f);
-    else if (kind === 'web') pause('web', t, WEB_SWAP_S + boss.webs.hits * sacShot);
-    else if (kind === 'laser') {
-      phases.push({ kind: 'laser', start: t, end: t + boss.lasers.immune });
-      blocked.push([t, t + boss.lasers.immune]);
-    } else if (kind === 'timer') timer.next = t + timer.b.delay;
-    else if (kind === 'heads') nextHead = t;
+    hitshield: (t) => raiseShield(phases.find((p) => p.kind === 'laser' && t >= p.start && t < p.end)?.end ?? t),
+    demonsplit: split,
+    callThePups: callPups,
+    webOfLies: (t, f, b) => pause('web', t, WEB_SWAP_S + b.hits * sacShot),
+    beams: (t, f, b) => {
+      phases.push({ kind: 'laser', start: t, end: t + b.immune });
+      blocked.push([t, t + b.immune]);
+    },
+    wipeTimer: (t, f, b) => { timers.find((x) => x.b === b).next = t + b.delay; },
+    nukekubiHeads: (t) => { nextHead = t; },
   };
 
   for (let tick = 0, n = 1; tick < Math.min(endTick, despawnTick); n++) {
@@ -501,7 +496,7 @@ function fight(input, opts, skip) {
     }
     // Ferocity: each full 100 is an extra strike, the rest a chance at one more; strikes repeat the hit.
     let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
-    if (boss?.feroDivisor && !shield) fero /= boss.feroDivisor;
+    if (shieldB?.feroDivisor && !shield) fero /= shieldB.feroDivisor;
     const strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
 
     out.hits++;
@@ -590,8 +585,8 @@ function fight(input, opts, skip) {
       bossStrikes.push(...struck.slice(1));
       bossStrikes.sort((a, b) => a.t - b.t);
       // A phase starts at the hit or strike that crosses its line; later strikes are absorbed.
-      const gate = !demons && !pups && triggers.find((x) => GATES.has(x.kind) && hp <= x.f * maxHp);
-      gateAt = gate ? absorbPast(gate.f * maxHp, t, struck[0], gate.kind === 'shield' || gate.kind === 'laser') : t;
+      const gate = !demons && !pups && triggers.find((x) => x.gate && hp <= x.f * maxHp);
+      gateAt = gate ? absorbPast(gate.f * maxHp, t, struck[0], gate.cap) : t;
       hp = Math.max(0, hp);
       hpPct = hp / maxHp * 100;
     }
@@ -611,8 +606,8 @@ function fight(input, opts, skip) {
       break;
     }
     while (!demons && !pups && triggers.length && hp <= triggers[0].f * maxHp) {
-      const { kind, f, timer } = triggers.shift();
-      trigger(kind, Math.max(t, gateAt), f, timer);
+      const { f, b } = triggers.shift();
+      ON_LINE[b.kind](Math.max(t, gateAt), f, b);
     }
     tick += step;
   }
@@ -662,11 +657,10 @@ function fight(input, opts, skip) {
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
-  if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; a head every 6 s, looked at 0.5 s each once two are up.');
   for (const n of blockNotes(blocks)) notes.push(`Boss phases: ${n}.`);
   if (boss?.enrage) notes.push(`Boss phases: Enrage (Mad at ${boss.enrage.at} s, Enraged ${boss.enrage.mad} s later for ${boss.enrage.enraged} s) is tanked, so it costs no time.`);
-  if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.webs ? `; Web of Lies costs ${WEB_SWAP_S} s to swap and re-engage plus ${boss.webs.hits} shortbow shots at the egg sacs` : ''}${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
-  if (boss?.split) {
+  if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
+  if (splitB) {
     notes.push(`Boss phases: dagger swaps take ${DAGGER_SWAP_S * 1000} ms; fire pits and demon beams are dodged; despawn after 4 minutes is assumed.`);
     if (boss.hellion && weapons.length < 2) notes.push('Only one dagger: hits on the wrong attunement lose 99% of their damage.');
   }
