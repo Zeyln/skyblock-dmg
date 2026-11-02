@@ -53,7 +53,33 @@ export function createSimGraphic(s, { labels, name, boss }) {
   };
   show(name);
   const tag = h('div', { class: 'sim-nametag', 'aria-hidden': 'true' });
-  const target = h('div', { class: 'sim-target' }, tag, h('div', { class: 'sim-dummy-wrap' }, dummy, face, pops));
+  const wrap = h('div', { class: 'sim-dummy-wrap' }, dummy, face, pops, tag);
+  const target = h('div', { class: 'sim-target' }, wrap);
+  // The nametag's bottom edge goes just above the top of the picture as first shown, once (it never
+  // moves after, whatever is hit or however many lines it has). The picture is scaled to fit and sits
+  // at the bottom of its area, so its top is found from its natural size. Hidden until placed.
+  let placed = false;
+  const placeTag = () => {
+    if (placed || !wrap.isConnected || !wrap.clientHeight) return;
+    const area = wrap.getBoundingClientRect();
+    let top;
+    if (!face.hidden) {
+      if (!face.complete) return; // placed on load
+      const box = face.getBoundingClientRect();
+      const scale = face.naturalWidth ? Math.min(box.width / face.naturalWidth, box.height / face.naturalHeight) : 0;
+      top = scale ? box.bottom - face.naturalHeight * scale - area.top : 0;
+    } else top = dummy.getBoundingClientRect().top - area.top;
+    const k = wrap.clientHeight / area.height; // measured sizes are scaled while the window animates in
+    tag.style.bottom = `${Math.round((area.height - top) * k + 4)}px`;
+    tag.classList.add('placed');
+    placed = true;
+  };
+  face.addEventListener('load', placeTag);
+  face.addEventListener('error', placeTag);
+  // Also each frame from the start until laid out (the window may still be opening), for up to ~10 s.
+  let tries = 600;
+  const tryPlace = () => { placeTag(); if (!placed && --tries > 0) requestAnimationFrame(tryPlace); };
+  requestAnimationFrame(tryPlace);
 
   // ---------- Nametag: name and health above the mob, as in-game, changing with the phase ----------
   let last = null; // the latest replayed event
@@ -66,6 +92,7 @@ export function createSimGraphic(s, { labels, name, boss }) {
   const activeAt = (kind) => (s.phases || []).find((p) => p.kind === kind && tagClock >= p.start && tagClock < p.end);
   const ATTUNE = { Ashen: '7', Spirit: 'f', Auric: 'e', Crystal: 'b' };
   function renderTag() {
+    placeTag();
     const who = last?.target || name;
     const isBoss = boss && !last?.target;
     const hp = last ? last.hp : s.startHp;

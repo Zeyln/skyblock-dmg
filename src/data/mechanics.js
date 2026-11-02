@@ -1048,6 +1048,12 @@ export const OUTLAW = {
 //     hits until hitUntil, then backs out (out), waits out the barrage and comes back. The barrage
 //     length and the movement times aren't published: assumed. Every 30 s from spawn is assumed.
 //   Explosive Assault's TNT heals it 500k per player hit: left out, as the player dodges it (best case).
+// Revenant Horror, from its wiki page (Nov 2026): despawns after 3 minutes. Enrage (T3+): 40 s in it
+//   goes Mad, 5 s later Enraged for 12 s (faster, much more damage). The player tanks it (best-case
+//   gear), so it costs no time; shown only. Once per fight is assumed (the wiki gives no repeat).
+//   Life Drain, Pestilence and Slam Dunk only hurt the player. Its regeneration only starts when it
+//   hasn't hit the player for a while, which never happens in melee: left out.
+export const REVENANT_ENRAGE = { at: 40, mad: 5, enraged: 12 };
 export const ATONED_REGEN = 1 / 1000;
 export const ATONED_BOOM = { every: 30, hitUntil: 4.5, out: 0.5, barrage: 1, back: 0.5 };
 
@@ -1068,6 +1074,11 @@ export function bossPhases(enemyName) {
     };
   }
   if (enemyName === 'Mage Outlaw') return { outlaw: OUTLAW };
+  const revenant = /^Revenant Horror (I|II|III|IV)$/.exec(enemyName || '');
+  if (revenant) {
+    const t = TIERS.indexOf(revenant[1]);
+    return { tier: t + 1, despawnS: 180, enrage: t >= 2 ? REVENANT_ENRAGE : null };
+  }
   if (enemyName === 'Atoned Horror') return { tier: 5, despawnS: 180, regen: ATONED_REGEN, boom: ATONED_BOOM };
   const sven = /^Sven Packmaster (III|IV)$/.exec(enemyName || '');
   if (sven) return { tier: TIERS.indexOf(sven[1]) + 1, pups: { at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 } };

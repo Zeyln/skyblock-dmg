@@ -590,3 +590,28 @@ describe('Atoned Horror phases', () => {
     expect(s.phaseKinds).toEqual(['boom', 'clutch']);
   });
 });
+
+describe('Revenant Horror phases', () => {
+  const rev = (tier, maxHp) => ({ enemy: `Revenant Horror ${tier}`, maxHp, mobs: ['Undead'], boss: true });
+  const run = (tier, maxHp, DAMAGE) => simulate(noCrit({ item: sword({ DAMAGE }) }, { target: rev(tier, maxHp) }), { mode: 'kill' });
+
+  it('T3+: Mad at 40 s, Enraged 45–57 s, tanked: no time lost', () => {
+    const s = run('IV', 1.5e6, 2e3);
+    expect(s.phases.filter((p) => p.kind === 'enrage').map((p) => [p.start, p.end, p.detail]))
+      .toEqual([[40, 45, 'Mad'], [45, 57, 'Enraged']]);
+    expect(s.phaseKinds).toEqual(['enrage']);
+    const gaps = s.events.filter((e) => !e.feroOnly).map((e, i, a) => (i ? e.t - a[i - 1].t : 0));
+    expect(Math.max(...gaps)).toBeCloseTo(0.5);
+  });
+
+  it('no Enrage phase when the boss dies first; none below T3', () => {
+    expect(run('IV', 1.5e6, 2e5).phases).toEqual([]);
+    expect(run('II', 20000, 50).phaseKinds).toEqual([]);
+  });
+
+  it('despawns after 3 minutes: the quest fails', () => {
+    const s = run('IV', 1.5e6, 100);
+    expect(s.despawned).toBe(true);
+    expect(s.seconds).toBe(180);
+  });
+});

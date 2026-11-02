@@ -747,7 +747,8 @@ button.primary:hover { color: var(--on-accent); }
 
 /* Middle of the simulation: the target with its damage numbers, and the damage graph beside it. */
 .sim-visual { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(140px, 0.7fr) minmax(0, 1.6fr); gap: 16px; align-items: center; }
-.sim-target { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+/* The top padding keeps room for one nametag line, so the name isn't cut off by the panel edge. */
+.sim-target { display: flex; flex-direction: column; align-items: center; min-width: 0; padding-top: 26px; }
 .sim-dummy-wrap { position: relative; width: 100%; max-width: 220px; aspect-ratio: 1; }
 .sim-dummy { position: absolute; inset: 25% 20% 0; width: 60%; height: 75%; }
 .sim-dummy .head, .sim-dummy .body, .sim-dummy .arm { fill: var(--muted); }
@@ -757,13 +758,19 @@ button.primary:hover { color: var(--on-accent); }
 .sim-face { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center bottom; user-select: none; }
 .sim-face.head { inset: 18%; width: 64%; height: 64%; image-rendering: pixelated; }
 .sim-face[hidden] { display: none; }
-/* Nametag above the mob, as in-game: a dark translucent plate with the bright in-game colours (both themes). */
+/* Nametag above the mob, as in-game: a dark translucent plate with the bright in-game colours (both themes).
+   Laid over the picture, anchored at its bottom edge: more lines grow upward and may overlap anything,
+   never pushing the picture. Each line stays on one line; lines only break where the tag has one. */
 .sim-nametag {
   --tag-a: #55ff55; --tag-b: #55ffff; --tag-c: #ff5555; --tag-d: #ff55ff; --tag-e: #ffff55; --tag-f: #ffffff;
   --tag-5: #aa00aa; --tag-7: #aaaaaa;
+  position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); z-index: 1; visibility: hidden;
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 8px;
-  max-width: 100%; background: rgba(0, 0, 0, .45); font-size: 13px; line-height: 1.2; text-align: center;
+  width: max-content; white-space: nowrap; background: rgba(0, 0, 0, .45); font-size: 13px; line-height: 1.2; text-align: center;
+  pointer-events: none;
 }
+:root[data-theme="dark"] .sim-nametag { background: rgba(0, 0, 0, .35); }
+.sim-nametag.placed { visibility: visible; }
 .sim-nametag:empty { display: none; }
 .sim-nametag .b { font-weight: 700; }
 /* In-game symbols (❤ ☠ ✧) as pixel icons: the pixel font has no such glyphs. Coloured by the text colour. */

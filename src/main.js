@@ -1556,7 +1556,7 @@ function renderSim(body, startDelay = 0) {
     hellion: 'Hellion Shield', split: 'Demonsplit', pillar: 'Fire Pillar', swap: 'Dagger swap',
     pups: 'Call the pups!',
     crystal: 'End Crystal', skulls: 'Summoned Skulls', reflect: 'Damage Shield',
-    boom: 'Thermonuclear',
+    enrage: 'Enrage', boom: 'Thermonuclear',
     clutch: 'Clutch',
   };
   const phases = s.phases || [];

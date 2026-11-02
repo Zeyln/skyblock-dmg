@@ -297,6 +297,12 @@ function fight(input, opts, skip) {
   };
   let nextPillar = null;
   let nextBoom = boss?.boom ? boss.boom.every : null;
+  // Revenant Enrage: on a clock, and tanked, so only shown.
+  if (boss?.enrage) {
+    const { at, mad, enraged } = boss.enrage;
+    phases.push({ kind: 'enrage', start: at, end: at + mad, detail: 'Mad' },
+      { kind: 'enrage', start: at + mad, end: at + mad + enraged, detail: 'Enraged' });
+  }
   // Natural regeneration: the boss heals between hits (bossMax a second × regen).
   const bossMax = base.targetMaxHp || 0;
   let regenAt = 0;
@@ -651,6 +657,7 @@ function fight(input, opts, skip) {
   if (shield) phases.push({ kind: 'shield', start: shield.start, end: Math.min(shield.breakAt ?? seconds, seconds) });
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
+  for (let i = phases.length - 1; i >= 0; i--) if (phases[i].start >= seconds && phases[i].kind === 'enrage') phases.splice(i, 1); // never got to it
   if (despawned) notes.push(`The boss despawned after ${boss.despawnS / 60} minutes: the Slayer quest failed.`);
   else if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
@@ -658,6 +665,7 @@ function fight(input, opts, skip) {
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
   if (boss?.shield) notes.push('Boss phases: Ferocity strikes are counted as Hitshield hits; glyphs every 8 s (unconfirmed for T3+), 0.5–0.75 s to break; a head every 6 s, looked at 0.5 s each once two are up.');
+  if (boss?.enrage) notes.push(`Boss phases: Enrage (Mad at ${boss.enrage.at} s, Enraged ${boss.enrage.mad} s later for ${boss.enrage.enraged} s) is tanked, so it costs no time.`);
   if (boss?.boom) notes.push(`Boss phases: Thermonuclear every ${boss.boom.every} s (assumed from spawn): hits until ${boss.boom.hitUntil} s into its 5 s countdown, then ${(boss.boom.out + boss.boom.barrage + boss.boom.back).toFixed(1)} s out of range (assumed); natural regeneration of 1/1000 of max health a second; TNT heals are left out (dodged).`);
   if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.webs ? `; Web of Lies costs ${WEB_SWAP_S} s to swap and re-engage plus ${boss.webs.hits} shortbow shots at the egg sacs` : ''}${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
   if (boss?.split) {
@@ -676,7 +684,7 @@ function fight(input, opts, skip) {
       boss.leaps && 'leap', boss.webs && 'web', boss.brood && 'brood',
       boss.hellion && 'hellion', boss.split && 'split', boss.pillars && 'pillar', boss.hellion && weapons.length > 1 && 'swap',
       boss.pups && 'pups', ...(boss.outlaw ? ['crystal', 'skulls', 'reflect'] : []),
-      boss.boom && 'boom', (boss.glyphs || boss.pillars || boss.boom) && 'clutch',
+      boss.enrage && 'enrage', boss.boom && 'boom', (boss.glyphs || boss.pillars || boss.boom) && 'clutch',
     ].filter(Boolean),
   };
 }
