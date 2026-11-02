@@ -2,10 +2,10 @@ import { calculate } from './calc.js';
 import {
   TICKS_PER_SECOND, FEROCITY_CAP, meleeHitTicks, shortbowTicks, BOW_DRAW_TICKS, SHORTBOWS,
   FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_ARROWS,
-  LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION, DAGGER_SWAP_S,
+  LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION,
   DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, enemyBlocks,
 } from './data/mechanics.js';
-import { legacyBoss, phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines } from './bossMechanics.js';
+import { phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines, scheduledPhases } from './bossMechanics.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
 export const SIM_MAX_SECONDS = 600;
@@ -96,7 +96,7 @@ function fight(input, opts, skip) {
     const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}|${toss}`;
     let r = cache.get(key);
     if (!r) {
-      const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * boss.brood.hpMult } : {};
+      const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * broodB.hpMult } : {};
       r = calculate({
         ...input,
         weapon: weapons[w] || input.weapon,
@@ -147,13 +147,17 @@ function fight(input, opts, skip) {
   // { kind, start, end } in seconds, for the indicator. HP thresholds trigger in order as the boss's
   // HP falls past them.
   const blocks = maxHp ? enemyBlocks(input.target?.enemy) : [];
-  const boss = legacyBoss(blocks);
   const despawnS = despawnSeconds(blocks);
   const blk = (kind) => blocks.find((b) => b.kind === kind) || null;
   const shieldB = blk('hitshield');
   const splitB = blk('demonsplit');
   const pupsB = blk('callThePups');
   const outlawB = blk('outlawSpecials');
+  const headsB = blk('nukekubiHeads');
+  const backstabB = blk('backstab');
+  const broodB = blk('conjoinedBrood');
+  const hellionB = blk('hellionShield');
+  const swapS = blk('daggerSwaps')?.seconds || 0;
   const regen = regenPerSecond(blocks);
   const phases = [];
   const startFrac = hp / maxHp;
@@ -273,12 +277,12 @@ function fight(input, opts, skip) {
   let heads = []; // spawn times of heads still alive
   if (shieldB?.at.includes(1) && startFrac >= 1) raiseShield(0);
   // Backstab leaps: the player re-aims for a moment after each.
-  let nextLeap = boss?.leaps ? boss.leaps.every : null;
+  let nextLeap = backstabB ? backstabB.every : null;
   // Web of Lies: swap to a shortbow and shoot the egg sacs (Piercing hits them all), no melee meanwhile.
   const sacShot = shortbowTicks(base.totals.ATTACK_SPEED || 0) / TICKS_PER_SECOND;
   const despawnTick = despawnS ? despawnS * TICKS_PER_SECOND : Infinity;
   // Inferno Demonlord: the shield's attunement, the demons once split, fire pillars, and the
-  // attunement the player is holding (a dagger swap or toggle costs DAGGER_SWAP_S).
+  // attunement the player is holding (a dagger swap or toggle costs swapS).
   const derpy = input.target?.maxHp ? (base.targetMaxHp || 0) / input.target.maxHp : 1;
   let attune = 0;
   let attuneHits = 0;
@@ -298,12 +302,9 @@ function fight(input, opts, skip) {
     splitPhase = name ? { kind: 'split', start: t, end: Infinity, detail: name } : null;
     if (splitPhase) phases.push(splitPhase);
   };
-  // Revenant Enrage: on a clock, and tanked, so only shown.
-  if (boss?.enrage) {
-    const { at, mad, enraged } = boss.enrage;
-    phases.push({ kind: 'enrage', start: at, end: at + mad, detail: 'Mad' },
-      { kind: 'enrage', start: at + mad, end: at + mad + enraged, detail: 'Enraged' });
-  }
+  // Phases on a fixed clock (Revenant Enrage).
+  const scheduled = scheduledPhases(blocks);
+  phases.push(...scheduled);
   // Natural regeneration: the boss heals between hits (bossMax a second × regen).
   const bossMax = base.targetMaxHp || 0;
   let regenAt = 0;
@@ -397,7 +398,7 @@ function fight(input, opts, skip) {
     }
     while (nextLeap !== null && t >= nextLeap) {
       pause('leap', nextLeap, LEAP_AIM_S);
-      nextLeap += boss.leaps.every;
+      nextLeap += backstabB.every;
     }
     if (shield?.breakAt != null && t >= shield.breakAt) {
       phases.push({ kind: 'shield', start: shield.start, end: shield.breakAt });
@@ -422,12 +423,12 @@ function fight(input, opts, skip) {
         pause('heads', nextHead, heads.length * HEAD_LOOK_S, heads[0]);
         heads = [];
       }
-      nextHead += boss.heads.every;
+      nextHead += headsB.every;
     }
     // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
     // use the dagger whose family takes its attunement (swapping or toggling first if needed).
     const demon = demons ? demons.list[demons.active] : null;
-    const need = boss?.hellion ? (demon ? demon.attunes[demon.at] : HELLION_ORDER[attune]) : null;
+    const need = hellionB ? (demon ? demon.attunes[demon.at] : HELLION_ORDER[attune]) : null;
     let w = 0;
     if (need) {
       const i = weapons.findIndex((x) => DAGGER_FAMILIES[daggerFamily(x.item.id)]?.attunes.includes(need));
@@ -435,7 +436,7 @@ function fight(input, opts, skip) {
         w = i;
         if (held !== null && held !== need) {
           held = need;
-          pause('swap', t, DAGGER_SWAP_S);
+          pause('swap', t, swapS);
           n--;
           continue;
         }
@@ -443,7 +444,7 @@ function fight(input, opts, skip) {
       }
     }
     const matched = !need || DAGGER_FAMILIES[daggerFamily(weapons[w]?.item.id)]?.attunes.includes(need);
-    if (boss?.hellion) {
+    if (hellionB) {
       const att = need ? need[0] + need.slice(1).toLowerCase() : '';
       showHellion(t, `${att} · ${matched ? weapons[w].item.name : 'no matching dagger'}${demon ? ` · ${demon.name}` : ''}`);
     }
@@ -590,10 +591,10 @@ function fight(input, opts, skip) {
       hp = Math.max(0, hp);
       hpPct = hp / maxHp * 100;
     }
-    if (maxHp && hp <= 0 && boss?.brood && !broodOn) {
+    if (maxHp && hp <= 0 && broodB && !broodOn) {
       // Till Death Do Us Part: the Conjoined Brood takes over with more health and only its passives.
       broodOn = true;
-      maxHp *= boss.brood.hpMult;
+      maxHp *= broodB.hpMult;
       hp = maxHp;
       hpPct = 100;
       triggers.length = 0;
@@ -650,21 +651,15 @@ function fight(input, opts, skip) {
   if (shield) phases.push({ kind: 'shield', start: shield.start, end: Math.min(shield.breakAt ?? seconds, seconds) });
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
-  for (let i = phases.length - 1; i >= 0; i--) if (phases[i].start >= seconds && phases[i].kind === 'enrage') phases.splice(i, 1); // never got to it
+  for (let i = phases.length - 1; i >= 0; i--) if (phases[i].start >= seconds && scheduled.includes(phases[i])) phases.splice(i, 1); // never got to it
   if (despawned) notes.push(`The boss despawned after ${despawnS / 60} minutes: the Slayer quest failed.`);
   else if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
-  for (const n of blockNotes(blocks)) notes.push(`Boss phases: ${n}.`);
-  if (boss?.enrage) notes.push(`Boss phases: Enrage (Mad at ${boss.enrage.at} s, Enraged ${boss.enrage.mad} s later for ${boss.enrage.enraged} s) is tanked, so it costs no time.`);
-  if (boss?.leaps) notes.push(`Boss phases: a Backstab leap every ${boss.leaps.every} s (assumed) costs ${LEAP_AIM_S * 1000} ms re-aiming${boss.brood ? '; natural regeneration is not modelled' : ''}.`);
-  if (splitB) {
-    notes.push(`Boss phases: dagger swaps take ${DAGGER_SWAP_S * 1000} ms; fire pits and demon beams are dodged; despawn after 4 minutes is assumed.`);
-    if (boss.hellion && weapons.length < 2) notes.push('Only one dagger: hits on the wrong attunement lose 99% of their damage.');
-  }
-  if (!boss && input.target?.boss) notes.push('Boss damage caps are not modelled.');
+  for (const n of blockNotes(blocks, { weapons: weapons.length })) notes.push(`Boss phases: ${n}.`);
+  if (!blocks.length && input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {
     mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp,
