@@ -11,7 +11,8 @@ import {
 import { REFORGE_STONES } from './data/reforgeStones.js';
 import { applyPet } from './data/pets.js';
 import { detectSets, evaluateSets } from './data/sets.js';
-import { weaponAbility, greedBase, NOT_ON_ABILITIES, mageStats, mageBeamMult, mageCooldownPct, BASE_MANA, MANA_REGEN_PCT } from './data/abilities.js';
+import { weaponAbility, greedBase, NOT_ON_ABILITIES, mageStats, mageBeamMult, mageCooldownPct, BASE_MANA, MANA_REGEN_PCT,
+  DEPLOYABLES, MANA_POTION_MAX } from './data/abilities.js';
 import { enemyBlocks } from './data/mechanics.js';
 import { magicResistPct, bowImmune } from './bossMechanics.js';
 
@@ -273,6 +274,7 @@ export function calculate(input) {
   const hitNumber = player.hitNumber || 0;
   let lightningPct = 0;
   let overloadPct = 0;
+  let manaSteal = 0;
   for (const ench of ENCHANTS) {
     const lvl = weapon.enchants?.[ench.id] || 0;
     if (!lvl || oneForAll) continue;
@@ -290,6 +292,7 @@ export function calculate(input) {
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
     if (ench.sim === 'lightning') { lightningPct = v; continue; } // every 3rd hit, simulation only
     if (ench.overload) { overloadPct = v; continue; } // applied to crits below
+    if (ench.manaSteal) { manaSteal = v; continue; } // mana on hit, the simulation's
     if (magic && NOT_ON_ABILITIES.includes(ench.id)) continue;
     if (!hitsMob(ench.mobs, target)) continue;
     // The simulation passes the hit's number; a single hit uses the First hit(s) setting.
@@ -402,6 +405,10 @@ export function calculate(input) {
   }
   if (bow && input.twilightPoison) multiplicative.push({ label: 'Twilight Arrow Poison', value: TWILIGHT_POISON_MULT });
 
+  // Power Orb or Flare (one deployable buff applies): its stats; its mana regen is below.
+  const deployable = DEPLOYABLES[input.deployable];
+  if (deployable) sources.push({ label: deployable.name, stats: { ...deployable.stats } });
+
   // God Potion
   if (input.godPotion) {
     sources.push({ label: 'God Potion', stats: { ...GOD_POTION.stats } });
@@ -423,7 +430,7 @@ export function calculate(input) {
   // Speed so far (base 100 plus gear, pet, reforges…), for the Warden Helmet.
   const speed = 100 + sources.reduce((a, src) => a + (src.stats.WALK_SPEED || 0), 0);
   const sets = evaluateSets(detected, {
-    bow, magic, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
+    bow, magic, inWater: !!player.inWater, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
     inDungeon: input.dungeonMode === 'catacombs' || input.dungeonMode === 'master',
   }, input.setInputs);
   sources.push(...sets.sources);
@@ -505,9 +512,19 @@ export function calculate(input) {
   const arrowImmune = bowImmune(enemyBlocks(target.enemy));
   if (bow && arrowImmune) notes.push(`${target.enemy} is immune to bow damage.`);
 
-  // Mana (wiki, Mana): 100 + Intelligence, 2% of it back a second.
-  const maxMana = BASE_MANA + Math.max(0, intelligence);
-  const manaRegen = maxMana * MANA_REGEN_PCT / 100;
+  // Mana (wiki, Mana; data/abilities.js): 100 + Intelligence (the Sheep pet adds % in dungeons); each
+  // second 2% of it × (1 + Mana Regen %) × the deployable, rounded up, plus a Mana Potion's flat amount.
+  const maxMana = (BASE_MANA + Math.max(0, intelligence)) * (1 + pet.maxManaPct / 100);
+  const manaRegenPct = (totals.MANA_REGEN || 0) + pet.manaRegen;
+  const potion = Math.max(0, Math.min(MANA_POTION_MAX, Math.floor(input.manaPotion || 0)));
+  const manaRegen = Math.ceil(maxMana * MANA_REGEN_PCT / 100 * (1 + manaRegenPct / 100) * (deployable?.regenMult || 1) - 1e-9) + potion;
+  const manaSources = [
+    ...pet.manaLabels.map((l) => `${input.pet?.name || 'Pet'}: ${l}`),
+    totals.MANA_REGEN ? `Mana Regeneration attribute +${totals.MANA_REGEN}%` : '',
+    deployable ? `${deployable.name} ×${deployable.regenMult}` : '',
+    potion ? `Mana Potion ${roman(potion)} +${potion} a second` : '',
+    sets.manaCostMult !== 1 ? 'Wise Dragon Armor: 2/3 cost' : '',
+  ].filter(Boolean);
   // The ability's Magic Damage (wiki, Damage Calculation › Ability Damage):
   // Base × (1 + Intelligence/100 × Scaling) × (1 + Ability Damage/100) × Additive × Multiplicative,
   // then magic resistance and defense. A damage-over-time ability's base is spread over its seconds.
@@ -526,7 +543,9 @@ export function calculate(input) {
     cast = {
       name: spell.name, base, perTick, scaling: spell.scaling, intMult, adMult, additiveMult: addMult, resist, resistMult,
       hit, over: spell.over || 0, melee: !!spell.melee, noAdditive: !!spell.noAdditive,
-      manaCost: spell.mana * (1 - wise / 100), wisePct: wise,
+      // Cost reductions multiply (wiki, Wise Dragon Armor).
+      manaCost: spell.mana * (1 - wise / 100) * pet.manaCostMult * sets.manaCostMult, wisePct: wise,
+      manaStep: (spell.manaStep || 0) * (1 - wise / 100) * pet.manaCostMult * sets.manaCostMult, manaReset: spell.manaReset || 0,
       cooldown: spell.cooldown * (1 - cdr / 100), cooldownPct: cdr,
     };
     if (resist >= 100) notes.push(`${target.enemy} is immune to Magic Damage: ${spell.name} deals nothing.`);
@@ -546,7 +565,7 @@ export function calculate(input) {
     nonCrit, crit, expected, megaCrit, megaChance, overloadPct,
     // An enemy immune to bows takes nothing from arrows.
     ...(bow && arrowImmune ? { nonCrit: 0, crit: 0, expected: 0, megaCrit: 0 } : {}),
-    intelligence, abilityDamage, maxMana, manaRegen, mage,
+    intelligence, abilityDamage, maxMana, manaRegen, manaRegenPct, manaSources, manaSteal, mage,
     // Magic Damage (damageType 'magic'): the ability's hit, which never crits.
     ability: cast, ...(cast ? { nonCrit: cast.hit, crit: cast.hit, expected: cast.hit, megaCrit: cast.hit, critChance: 0, megaChance: 0 } : {}),
   };

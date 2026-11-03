@@ -92,7 +92,8 @@ function fight(input, opts, skip) {
   // As fast as the game allows: once the cooldown is up (at least a tick apart). One that deals damage
   // over time is recast once the last has run out; its ticks land each second from the cast.
   const castEvery = casting ? Math.max(1, Math.round(spell.cooldown * TICKS_PER_SECOND), spell.over * TICKS_PER_SECOND) : 0;
-  // Mana: full at the start, 2% of max back at each whole second; in dungeons a melee hit gives 5 + 1%.
+  // Mana: full at the start, the regen (calc.js) back at each whole second; in dungeons a melee or bow hit
+  // gives 5 + 1% of max, and Mana Steal its % on every hit.
   const maxMana = base.maxMana;
   let mana = maxMana;
   let manaSec = 0;
@@ -104,15 +105,24 @@ function fight(input, opts, skip) {
       manaSec += secs;
     }
   };
-  const hitMana = base.inDungeon ? DUNGEON_HIT_MANA.flat + maxMana * DUNGEON_HIT_MANA.pct / 100 : 0;
+  const hitMana = (base.inDungeon ? DUNGEON_HIT_MANA.flat + maxMana * DUNGEON_HIT_MANA.pct / 100 : 0) + maxMana * (base.manaSteal || 0) / 100;
   let nextSwing = 0;
   let nextCast = 0;
   const dots = []; // ticks of damage over time still to land
+  // A cost that climbs with each cast (Jerry-chine Gun) until manaReset passes without one.
+  let streak = 0;
+  let lastCast = -Infinity;
+  const resetTick = () => lastCast + (spell.manaReset || 0) * TICKS_PER_SECOND;
+  const costAt = (tick) => spell.manaCost + (spell.manaStep && tick < resetTick() ? spell.manaStep * streak : 0);
   // When the next cast can go off: its cooldown is up and there's the mana (regen comes each whole second).
+  // A climbing cost may be cheaper to wait out until it resets.
   const castReady = () => {
-    if (mana >= spell.manaCost - 1e-9) return nextCast;
-    const secs = Math.ceil((spell.manaCost - mana) / base.manaRegen - 1e-9);
-    return Math.max(nextCast, (manaSec + secs) * TICKS_PER_SECOND);
+    const cost = costAt(nextCast);
+    if (mana >= cost - 1e-9) return nextCast;
+    const enough = (c) => (manaSec + Math.ceil((c - mana) / base.manaRegen - 1e-9)) * TICKS_PER_SECOND;
+    let at = enough(cost);
+    if (spell.manaStep && streak && at >= resetTick()) at = Math.max(resetTick(), enough(spell.manaCost));
+    return Math.max(nextCast, at);
   };
   // The next tick something is due (never before now).
   const wake = (tick) => Math.max(tick, Math.min(swinging ? nextSwing : Infinity, casting ? castReady() : Infinity, dots.length ? dots[0] : Infinity));
@@ -606,7 +616,9 @@ function fight(input, opts, skip) {
       trackStats(r.totals);
       dmg = r.nonCrit;
       if (action === 'cast') {
-        mana -= spell.manaCost;
+        mana -= costAt(tick);
+        streak = spell.manaStep && tick < resetTick() ? streak + 1 : 1;
+        lastCast = tick;
         lowestMana = Math.min(lowestMana, mana);
         nextCast = tick + castEvery;
         for (let k = 1; k < spell.over; k++) dots.push(tick + k * TICKS_PER_SECOND);
@@ -779,6 +791,7 @@ function fight(input, opts, skip) {
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
   for (const n of blockNotes(blocks, { weapons: weapons.length })) notes.push(`Boss phases: ${n}.`);
   if (casting) {
+    if (spell.manaStep) notes.push(`${spell.name}: each cast costs ${Math.round(spell.manaStep)} more mana than the last, back to ${Math.round(spell.manaCost)} after ${spell.manaReset} s without one.`);
     notes.push(`${spell.name}: ${Math.round(spell.manaCost)} mana a cast, at most every ${castEvery / TICKS_PER_SECOND} s; ${Math.round(maxMana)} max mana, +${Math.round(base.manaRegen)} a second.`);
     if (spell.over) notes.push(`${spell.name} deals its damage over ${spell.over} s and is recast once it runs out.`);
   }

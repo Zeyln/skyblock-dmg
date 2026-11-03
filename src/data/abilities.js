@@ -9,6 +9,7 @@
 //   melee: the damage counts as melee for immunities (Giant's Slam, wiki: Tarantula Broodfather)
 //   greed: base damage from the Dark Auction price, { min, bonus, cap } (Midas Staff)
 //   fixedCooldown: the cooldown isn't shortened (Wither Impact's 3-tick anti-autoclick limit)
+//   manaStep, manaReset (s): each cast costs manaStep more than the last, until manaReset passes without one
 
 const ability = (name, base, scaling, mana, cooldown = 0, extra = {}) => ({ name, base, scaling, mana, cooldown, ...extra });
 
@@ -57,6 +58,8 @@ export const ABILITIES = {
   GOLEM_SWORD: ability('Iron Punch', 250, 1, 70, 3),
   LEAPING_SWORD: ability('Leap', 350, 1, 50, 1),
   SILK_EDGE_SWORD: ability('Leap', 400, 1, 50, 1),
+  // Each shot costs 30 more than the last, back to 30 after 4 s without firing; 5 shots a second (wiki).
+  JERRY_STAFF: ability('Rapid-fire', 500, 0.2, 30, 0.2, { manaStep: 30, manaReset: 4 }),
 };
 
 // Enchantments that don't affect abilities: Sharpness (wiki, Flower of Truth: "Enchantments that do not
@@ -82,11 +85,26 @@ export function greedBase(ab, price) {
 }
 
 // ---------- Mana (wiki, Mana) ----------
-// Max mana = 100 + Intelligence; it regenerates 2% of max mana each second (more with Mana Regen %).
-// In dungeons a melee hit restores 5 + 1% of max mana (wiki, Mage › Strategies).
+// Max mana = 100 + Intelligence. Each second it regenerates 2% of max mana, raised by Mana Regen %
+// (pets, the Mana Regeneration attribute) and multiplied by a Power Orb or Flare, rounded up ("Mana
+// regen ticks are now rounded up", wiki history); a Mana Potion adds a flat amount on top. How the %
+// and the deployable combine isn't on the wiki: the % add up, the deployable multiplies.
+// In dungeons every melee or bow hit restores 5 + 1% of max mana (wiki, Catacombs); abilities don't.
 export const BASE_MANA = 100;
 export const MANA_REGEN_PCT = 2;
 export const DUNGEON_HIT_MANA = { flat: 5, pct: 1 };
+// Mana Potion I–VIII: +1 mana a second per level.
+export const MANA_POTION_MAX = 8;
+// Deployables (only one buff applies): mana regen multiplier and the stats they grant (wiki, Nov 2026).
+export const DEPLOYABLES = {
+  MANA_FLUX: { name: 'Mana Flux Power Orb', regenMult: 1.5, stats: { STRENGTH: 10 } },
+  OVERFLUX: { name: 'Overflux Power Orb', regenMult: 2, stats: { STRENGTH: 25 } },
+  PLASMAFLUX: { name: 'Plasmaflux Power Orb', regenMult: 2.25, stats: { STRENGTH: 35 } },
+  ALERT_FLARE: { name: 'Alert Flare', regenMult: 1.5, stats: { FEROCITY: 10, TRUE_DEFENSE: 20 } },
+  SOS_FLARE: { name: 'SOS Flare', regenMult: 2.25, stats: { FEROCITY: 10, ATTACK_SPEED: 5, TRUE_DEFENSE: 30 } },
+};
+// Wise Dragon Armor (full set): abilities cost exactly 2/3. Mana cost reductions multiply (wiki).
+export const WISE_DRAGON_COST = 2 / 3;
 
 // ---------- Mage class (wiki, Mage), in dungeons ----------
 // Efficient Spells: -25% cooldowns, and -1% more every other level (-50% at 50).

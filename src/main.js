@@ -11,7 +11,9 @@ import { createSimGraphic } from './simGraphic.js';
 import { PHASE_LABELS } from './bossMechanics.js';
 import { summarize } from './simResults.js';
 import { mobSprite } from './data/mobSprites.js';
-import { weaponAbility, WITHER_BLADES, WITHER_SCROLLS, greedBase, mageStats, mageCooldownPct } from './data/abilities.js';
+import {
+  weaponAbility, WITHER_BLADES, WITHER_SCROLLS, greedBase, mageStats, mageCooldownPct, DEPLOYABLES, MANA_POTION_MAX,
+} from './data/abilities.js';
 import {
   PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
 } from './data/pets.js';
@@ -62,6 +64,8 @@ const defaultState = () => ({
   dungeonClass: { id: '', level: 50, solo: false },
   setInputs: {},
   godPotion: false,
+  deployable: '', // Power Orb or Flare (data/abilities.js DEPLOYABLES)
+  manaPotion: 0,
   mayor: '', // '' | 'derpy' | 'jerry'
   bonuses: [
     { label: 'Pet effects not modeled' }, { label: 'Accessories (flat stats)' }, { label: 'Potions / buffs' }, { label: 'Other' },
@@ -1001,7 +1005,7 @@ function bonusSection() {
     .some((k) => b[k]) || (b.multiplier && b.multiplier !== 1));
   const summary = () => joinParts(
     `Combat ${state.combatLevel || 0}`, `Catacombs ${clampCatacombs(state.catacombsLevel)}`,
-    state.godPotion ? 'God Potion' : '', MAYORS[state.mayor] ? `Mayor ${MAYORS[state.mayor]}` : '', usedRows().length ? `${usedRows().length} custom bonus${usedRows().length > 1 ? 'es' : ''}` : '');
+    state.godPotion ? 'God Potion' : '', DEPLOYABLES[state.deployable]?.name || '', state.manaPotion ? `Mana ${roman(state.manaPotion)}` : '', MAYORS[state.mayor] ? `Mayor ${MAYORS[state.mayor]}` : '', usedRows().length ? `${usedRows().length} custom bonus${usedRows().length > 1 ? 'es' : ''}` : '');
   return panel('buffs', 'Buffs & skills', summary, [
     h('div', { class: 'grid' },
       numField('Combat level', 'combatLevel', { min: 0, max: 60, step: 1 }),
@@ -1011,6 +1015,11 @@ function bonusSection() {
       // Only special mayors that change a hit are listed.
       selectField('Mayor', 'mayor', [{ value: '', label: 'Other / none', cls: 'muted' },
         ...Object.entries(MAYORS).map(([id, name]) => ({ value: id, label: name, note: MAYOR_EFFECTS[id] }))], { rerender: true }),
+      // One deployable buff applies: its stats and its mana regen multiplier.
+      selectField('Power Orb / Flare', 'deployable', [{ value: '', label: 'None', cls: 'muted' },
+        ...Object.entries(DEPLOYABLES).map(([id, d]) => ({ value: id, label: d.name, note: `×${d.regenMult} mana regen, ${statText(d.stats)}` }))], { rerender: true }),
+      selectField('Mana Potion', 'manaPotion', [[0, 'None'], ...Array.from({ length: MANA_POTION_MAX }, (_, i) => ({
+        value: i + 1, label: `Mana ${roman(i + 1)}`, note: `+${i + 1} mana a second` }))], { num: true, rerender: true }),
       h('div', { class: 'chips', style: 'align-self:end;padding-bottom:6px' },
         chipField('God Potion', 'godPotion', { rerender: true, title: 'Strength VIII, Critical IV, Spirit IV, Archery IV' }),
         isBow(byId.get(state.weapon.id)) ? chipField('Twilight Arrow Poison', 'twilightPoison', { title: '×1.1 damage from arrows' }) : '')),
@@ -1024,6 +1033,14 @@ function bonusSection() {
         } }, '+ Add source'),
       ], usedRows().length > 0),
   ]);
+}
+
+// Whether anything equipped changes in water (the In water toggle is shown only then).
+function waterMatters() {
+  const armor = ARMOR_SLOTS.map((k) => state.armor[k]?.id || '');
+  const fullSet = (p) => armor.every((id) => id.startsWith(p));
+  return weaponMultipliers(state.weapon.id).some((r) => r.when === 'inWater') || state.pet.id === 'GUARDIAN'
+    || fullSet('SHARK_SCALE_') || fullSet('SPONGE_');
 }
 
 // Set while the user is editing a preset enemy's stats (the "Edit" link); a new enemy resets it.
@@ -1211,8 +1228,8 @@ function targetSection() {
         chipField('Was just hit', 'player.recentlyHit', { rerender: true }),
         chipField('Target has attacked you', 'target.attackedYou'),
         chipField('No other mobs within 15 blocks', 'target.isolated'),
-        // Only for weapons with an in-water bonus (Prismarine Blade).
-        weaponMultipliers(state.weapon.id).some((r) => r.when === 'inWater') ? chipField('In water', 'player.inWater') : ''),
+        // Only with something that changes in water: Prismarine Blade, Guardian pet, Shark Scale / Sponge Armor.
+        waterMatters() ? chipField('In water', 'player.inWater', { rerender: true }) : ''),
       h('div', { class: 'grid', style: 'margin-top:12px' },
         selectField('Distance to target', 'target.distance',
           [['close', 'Within 1.5 blocks'], ['normal', '1.5–3 blocks'], ['far', 'More than 3 blocks']])),
@@ -1326,6 +1343,8 @@ function buildInput() {
     catacombsLevel: state.catacombsLevel,
     dungeonMode: state.dungeonMode,
     godPotion: state.godPotion,
+    deployable: state.deployable,
+    manaPotion: state.manaPotion,
     skyblockLevel: state.skyblockLevel,
     twilightPoison: state.twilightPoison,
     mayor: state.mayor,
@@ -1434,7 +1453,8 @@ function abilityChain(m) {
     a.resist ? step('Magic resistance', a.resist >= 100 ? 'immune' : `${a.resist}%`, `×${fmt(a.resistMult, 3)}`) : '',
     m.defense ? step('Target defense', `100 / (100 + ${fmt(m.defense)})`, `×${fmt(m.defenseMult, 3)}`) : '',
     step(a.over ? 'Damage a second' : 'Damage a cast', 'Magic Damage never crits', fmt(a.hit), 'total'),
-    step('Mana', `${fmt(m.maxMana)} max, +${fmt(m.manaRegen, 1)} a second${a.wisePct ? `, Ultimate Wise −${a.wisePct}%` : ''}`, `${fmt(a.manaCost, 1)} a cast`),
+    step('Mana', [`${fmt(m.maxMana)} max, +${fmt(m.manaRegen, 1)} a second`, a.wisePct ? `Ultimate Wise −${a.wisePct}% cost` : '', ...m.manaSources].filter(Boolean).join(' · '),
+      a.manaStep ? `${fmt(a.manaCost, 1)}, +${fmt(a.manaStep, 1)} a cast` : `${fmt(a.manaCost, 1)} a cast`),
     step('Cooldown', a.cooldownPct ? `Mage −${a.cooldownPct}%` : '', a.cooldown ? `${fmt(a.cooldown, 2)} s` : 'none'),
   );
 }

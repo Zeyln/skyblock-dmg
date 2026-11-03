@@ -898,3 +898,49 @@ describe('SkyBlock level', () => {
     expect(r.strength).toBe(60);
   });
 });
+
+describe('mana', () => {
+  const nums = (other) => ({ LEGENDARY: { 1: { otherNums: other, statNums: {} }, 100: { otherNums: other, statNums: {} } } });
+  const petnums = { SHEEP: nums([20, 10, 25]), GUARDIAN: nums([20, 30, 30]), SUBZERO_WISP: nums([5]) };
+  const pet = (id, lore) => ({ id, name: id, rarity: 'LEGENDARY', level: 100, ...petNumbers(petnums, id, 'LEGENDARY', 100), lore: cleanLore(lore) });
+  const hype = { item: sword({ DAMAGE: 260, INTELLIGENCE: 1000 }, { id: 'HYPERION', dungeon_item: true }) };
+  const armor = (p) => ['HELMET', 'CHESTPLATE', 'LEGGINGS', 'BOOTS'].map((s) => ({ item: { id: `${p}${s}`, name: s, category: s, tier: 'LEGENDARY', stats: {} } }));
+  const magic = (extra = {}) => calculate({ weapon: hype, damageType: 'magic', ...extra });
+
+  it('regen: 2% of max × (1 + Mana Regen %) × the deployable, rounded up, plus the potion', () => {
+    expect(magic().manaRegen).toBe(22);
+    expect(magic({ shards: { mana_regeneration: 10 } }).manaRegen).toBe(Math.ceil(22 * 1.1));
+    expect(magic({ deployable: 'PLASMAFLUX' }).manaRegen).toBe(Math.ceil(22 * 2.25));
+    expect(magic({ deployable: 'PLASMAFLUX', manaPotion: 8 }).manaRegen).toBe(Math.ceil(22 * 2.25) + 8);
+  });
+
+  it('deployables grant their stats to every build', () => {
+    expect(calculate({ weapon: hype, deployable: 'OVERFLUX' }).strength).toBe(25);
+    expect(calculate({ weapon: hype, deployable: 'SOS_FLARE' }).totals.FEROCITY).toBe(10);
+  });
+
+  it('pets: Guardian (doubled in water), Subzero Wisp, Sheep', () => {
+    const guardian = pet('GUARDIAN', ['Mana Pool', 'Regenerate {2}% extra mana, doubled', 'when near or in water']);
+    expect(magic({ pet: guardian }).manaRegen).toBe(Math.ceil(22 * 1.3));
+    expect(magic({ pet: guardian, player: { inWater: true } }).manaRegen).toBe(Math.ceil(22 * 1.6));
+    const wisp = pet('SUBZERO_WISP', ['Ephemeral Stability', 'Regenerate mana 40% faster']);
+    expect(magic({ pet: wisp }).manaRegen).toBe(Math.ceil(22 * 1.4));
+    const sheep = pet('SHEEP', ['Mana Saver', 'Reduces the mana cost of abilities by', '{0}%.', 'Dungeon Wizard',
+      'Increases your total mana by {2}%', 'while in dungeons']);
+    expect(magic({ pet: sheep }).ability.manaCost).toBeCloseTo(240);
+    expect(magic({ pet: sheep }).maxMana).toBe(1100);
+    // In dungeons the Hyperion's Intelligence also gets the Catacombs boost (+10% at level 0).
+    expect(magic({ pet: sheep, dungeonMode: 'catacombs' }).maxMana).toBeCloseTo((100 + 1100) * 1.25);
+  });
+
+  it('cost reductions multiply: Wise Dragon 2/3 × Ultimate Wise', () => {
+    const r = magic({ armor: armor('WISE_DRAGON_'), weapon: { ...hype, ultimate: { id: 'ultimate_wise', level: 5 } } });
+    expect(r.ability.manaCost).toBeCloseTo(300 * 0.5 * 2 / 3);
+  });
+
+  it('Mana Steal is mana on hit, no damage', () => {
+    const r = calculate({ weapon: { ...hype, enchants: { mana_steal: 3 } } });
+    expect(r.manaSteal).toBe(0.75);
+    expect(r.additiveMult).toBe(1);
+  });
+});

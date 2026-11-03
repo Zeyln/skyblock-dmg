@@ -737,3 +737,22 @@ describe('Sven Packmaster', () => {
     expect(sven.seconds).toBe(180);
   });
 });
+
+describe('mana in the fight', () => {
+  const jerry = sword({ DAMAGE: 80, INTELLIGENCE: 900, WEAPON_ABILITY_DAMAGE: 500 }, { id: 'JERRY_STAFF' });
+  const hype = (int, extra = {}) => sword({ DAMAGE: 260, INTELLIGENCE: int }, { id: 'HYPERION', dungeon_item: true, ...extra });
+
+  it('Jerry-chine Gun: +30 a shot, back to 30 once 4 s pass without one', () => {
+    const s = simulate(noCrit({ item: jerry, attack: 'right' }, { target: { maxHp: 1e12 } }), { mode: 'duration', duration: 12 });
+    // 1,000 mana, +20 a second: 30, 60, … 210 in 1.2 s; 240 by 4 s; then the reset at 8 s.
+    expect(s.events.map((e) => e.t)).toEqual([0, 0.2, 0.4, 0.6, 0.8, 1, 1.2, 4, 8, 9]);
+  });
+
+  it('a Power Orb and Mana Steal mean more casts', () => {
+    const run = (extra) => simulate(noCrit({ item: hype(2000), attack: 'both', enchants: extra.enchants }, { target: { maxHp: 1e12 }, ...extra }),
+      { mode: 'duration', duration: 30 }).casts;
+    const plain = run({});
+    expect(run({ deployable: 'PLASMAFLUX' })).toBeGreaterThan(plain);
+    expect(run({ enchants: { mana_steal: 3 } })).toBeGreaterThan(plain);
+  });
+});

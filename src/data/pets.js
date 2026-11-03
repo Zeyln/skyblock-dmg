@@ -146,6 +146,14 @@ export const PET_RULES = [
   R('KUUDRA', 'Kuudra Specialist', new RegExp(`Increases all damage to Kuudra and his minions by ${N}%`),
     ([v], ctx) => (/Kuudra/.test(ctx.target.enemy || '') ? { additive: v } : null)),
 
+  // Mana: regeneration (Mana Regen %), cost and pool.
+  R('GUARDIAN', 'Mana Pool', new RegExp(`Regenerate ${N}% extra mana, doubled when near or in water`),
+    ([v], ctx) => ({ manaRegen: ctx.player.inWater ? v * 2 : v })),
+  RAW('SUBZERO_WISP', 'Ephemeral Stability', /Regenerate mana (\d+)% faster/, ([v]) => ({ manaRegen: v })),
+  R('SHEEP', 'Mana Saver', new RegExp(`Reduces the mana cost of abilities by ${N}%`), ([v]) => ({ manaCost: v })),
+  R('SHEEP', 'Dungeon Wizard', new RegExp(`Increases your total mana by ${N}% while in dungeons`),
+    ([v], ctx) => (ctx.inDungeon ? { maxManaPct: v } : null)),
+
   R('PIGMAN', 'Pork Master', new RegExp(`Pigman Sword by ${N}\\s*Damage and ${N}`),
     ([d, s], ctx) => (ctx.weaponId === 'PIGMAN_SWORD' ? { stats: { DAMAGE: d, STRENGTH: s } } : null)),
   R('SQUID', 'Ink Specialty', new RegExp(`Ink Wand by ${N}\\s*Damage and ${N}`),
@@ -173,7 +181,8 @@ const fmtNum = (v) => (v == null ? '?' : String(Math.round(v * 100) / 100));
  * pet: { name, rarity, level, item, itemName, stats, otherNums, lore } (stats/otherNums from petNumbers)
  */
 export function applyPet(pet, ctx) {
-  const result = { sources: [], additive: [], multiplicative: [], statPct: {}, firstStrikeBoost: 0, abilities: [] };
+  const result = { sources: [], additive: [], multiplicative: [], statPct: {}, firstStrikeBoost: 0, abilities: [],
+    manaRegen: 0, manaCostMult: 1, maxManaPct: 0, manaLabels: [] };
   if (!pet?.stats) return result;
 
   const effects = [];
@@ -211,6 +220,9 @@ export function applyPet(pet, ctx) {
     if (e.multiplier) result.multiplicative.push({ label, value: e.multiplier });
     for (const [k, v] of Object.entries(e.statPct || {})) if (v) result.statPct[k] = (result.statPct[k] || 0) + v;
     if (e.firstStrikeBoost) result.firstStrikeBoost += e.firstStrikeBoost;
+    if (e.manaRegen) { result.manaRegen += e.manaRegen; result.manaLabels.push(`${e.name} +${+e.manaRegen.toFixed(1)}% regen`); }
+    if (e.manaCost) { result.manaCostMult *= 1 - e.manaCost / 100; result.manaLabels.push(`${e.name} −${+e.manaCost.toFixed(1)}% cost`); }
+    if (e.maxManaPct) { result.maxManaPct += e.maxManaPct; result.manaLabels.push(`${e.name} +${+e.maxManaPct.toFixed(1)}% max mana`); }
   }
   return result;
 }

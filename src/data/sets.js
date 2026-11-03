@@ -7,8 +7,8 @@
 //   tierOf(baseId) -> 0..4 for tiered (Kuudra) sets; the lowest tier worn counts
 //   min: pieces needed for the bonus; full: pieces in a full set
 //   inputs: situational values the user supplies [{ key, label, type: 'number'|'toggle', min, max, def }]
-//   effect(ctx) -> { additive?, multiplier?, stats?, statPct?, pieceStatPct?, post?, text, inactive? }
-//     ctx: { count, tier, bow, magic (an ability's damage), inDungeon, target, weaponId, cataLevel, speed, input(key) }
+//   effect(ctx) -> { additive?, multiplier?, stats?, statPct?, pieceStatPct?, post?, manaCost? (× ability mana cost), text, inactive? }
+//     ctx: { count, tier, bow, magic (an ability's damage), inWater, inDungeon, target, weaponId, cataLevel, speed, input(key) }
 //   noHitEffect: description for sets that are detected but don't change a single hit.
 
 const KUUDRA_TIERS = ['Basic', 'Hot', 'Burning', 'Fiery', 'Infernal'];
@@ -110,6 +110,17 @@ export const SETS = [
     noHitEffect: 'spawns a wither minion; Maxor\'s pieces add arrow damage separately' },
 
   // ---------- Other armor ----------
+  {
+    id: 'wise_dragon', name: 'Wise Dragon Armor', bonus: 'Wise Blood', slot: 'armor', match: prefix('WISE_DRAGON_'), min: 4, full: 4,
+    effect: () => ({ manaCost: 2 / 3, text: 'abilities cost 2/3 of their mana' }),
+  },
+  // Absorb: Defense doubled in water (Defense doesn't change a hit; kept for the stats).
+  ...[['shark_scale', 'Shark Scale Armor', 'SHARK_SCALE_'], ['sponge', 'Sponge Armor', 'SPONGE_']].map(([id, name, p]) => ({
+    id, name, bonus: 'Absorb', slot: 'armor', match: (x) => x.startsWith(p) && /_(HELMET|CHESTPLATE|LEGGINGS|BOOTS)$/.test(x), min: 4, full: 4,
+    effect: ({ inWater }) => (inWater
+      ? { post: (t) => ({ DEFENSE: t.DEFENSE || 0 }), text: 'Defense doubled in water' }
+      : { inactive: true, text: 'Defense doubled in water (not in water)' }),
+  })),
   {
     id: 'superior', name: 'Superior Dragon Armor', bonus: 'Superior Blood', slot: 'armor', match: prefix('SUPERIOR_DRAGON_'), min: 4, full: 4,
     effect: () => ({ statPct: 5, text: '+5% combat stats' }),
@@ -278,7 +289,7 @@ export function detectSets(pieces) {
  * inputs: { [setId]: { [key]: value } }
  */
 export function evaluateSets(detected, ctx, inputs = {}) {
-  const result = { status: [], additive: [], multiplicative: [], sources: [], statPct: 0, pieceStatPct: [], post: [] };
+  const result = { status: [], additive: [], multiplicative: [], sources: [], statPct: 0, pieceStatPct: [], post: [], manaCostMult: 1 };
   for (const d of detected) {
     const { set } = d;
     const input = (key) => {
@@ -296,7 +307,7 @@ export function evaluateSets(detected, ctx, inputs = {}) {
     }
     const eff = set.effect({ ...ctx, count: d.count, tier: d.tier, helmet: d.helmet, input });
     const label = `${set.name}: ${set.bonus}`;
-    const active = !eff.inactive && !!(eff.additive || eff.multiplier || eff.stats || eff.statPct || eff.pieceStatPct || eff.post);
+    const active = !eff.inactive && !!(eff.additive || eff.multiplier || eff.stats || eff.statPct || eff.pieceStatPct || eff.post || eff.manaCost);
     result.status.push({ ...base, active, text: `${set.bonus}: ${eff.text}` });
     if (eff.inactive) continue;
     if (eff.additive) result.additive.push({ label, value: eff.additive });
@@ -305,6 +316,7 @@ export function evaluateSets(detected, ctx, inputs = {}) {
     if (eff.statPct) result.statPct += eff.statPct;
     if (eff.pieceStatPct) result.pieceStatPct.push({ ids: d.ids, pct: eff.pieceStatPct, label });
     if (eff.post) result.post.push({ label, fn: eff.post });
+    if (eff.manaCost) result.manaCostMult *= eff.manaCost;
   }
   return result;
 }

@@ -395,6 +395,8 @@ export const ENCHANTS = [
   { id: 'power', name: 'Power', on: BOW, values: [8, 16, 24, 32, 40, 50, 65] },
   // Crit Chance over 100% gives (CC - 100)% odds of a Mega Critical Hit for +k% (multiplicative) on a crit.
   { id: 'overload', name: 'Overload', on: BOW, overload: true, values: [10, 20, 30, 40, 50] },
+  // Mana Steal: % of max mana back on each hit (wiki); no damage.
+  { id: 'mana_steal', name: 'Mana Steal', on: ['SWORD', 'LONGSWORD', 'GAUNTLET'], manaSteal: true, values: [0.25, 0.5, 0.75] },
   { id: 'first_strike', name: 'First Strike', on: MELEE, firstHit: true, values: [25, 50, 75, 100, 125] },
   { id: 'triple_strike', name: 'Triple-Strike', on: MELEE, firstThree: true, values: [10, 20, 30, 40, 50] },
   // Per 1% of target HP lost / remaining
@@ -807,6 +809,8 @@ export const SHARDS = [
   { id: 'storm_elem', name: 'Storm Elemental', shard: 'Tempest', kind: 'stat', stat: 'STRENGTH', perLevel: 1 },
   { id: 'unlimited_power', name: 'Unlimited Power', shard: 'Jormung', kind: 'statPct', stat: 'STRENGTH', perLevel: 0.1 },
   { id: 'unlimited_energy', name: 'Unlimited Energy', shard: 'Etherdrake', kind: 'statPct', stat: 'CRITICAL_DAMAGE', perLevel: 0.1 },
+  // +1% mana regeneration per level (wiki, XYZ Shard).
+  { id: 'mana_regeneration', name: 'Mana Regeneration', shard: 'XYZ', kind: 'stat', stat: 'MANA_REGEN', perLevel: 1 },
 ];
 
 // Echo of Ruler: Ruler attributes +2%/level stronger. Echo of Echoes: other Echoes +5%/level stronger.
