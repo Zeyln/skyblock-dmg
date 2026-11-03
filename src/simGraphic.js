@@ -200,9 +200,10 @@ export function createSimGraphic(s, { labels, name, boss }) {
 
   const legend = kinds.length ? h('div', { class: 'sim-legend' }, kinds.map((k, i) =>
     h('span', {}, h('i', { class: `band-${i + 1}` }), labels[k]))) : '';
+  const chartWrap = h('div', { class: 'sim-chart-wrap' }, root, tip);
   const graph = h('div', { class: 'sim-graph' },
     h('div', { class: 'sim-graph-head' }, h('span', {}, 'Damage dealt'), legend),
-    h('div', { class: 'sim-chart-wrap' }, root, tip));
+    chartWrap);
 
   const el = h('div', { class: 'sim-visual' }, target, graph);
 
@@ -236,10 +237,15 @@ export function createSimGraphic(s, { labels, name, boss }) {
     },
     // When playback ends: the line and cursor run to the end of the axis (a kill at 0 s, or one
     // shorter than the axis, would otherwise stop short of it).
-    finish() {
+    // The fight is over: the line runs to the end, and onResults (if given) gets a "Results" button
+    // in the graph's top-left corner.
+    finish(onResults) {
       points.push([end, points.at(-1)[1]]);
       line.setAttribute('points', points.map(([t, v]) => `${x(t)},${y(v)}`).join(' '));
       this.tick(end);
+      if (onResults && !chartWrap.querySelector('.sim-results-btn')) {
+        chartWrap.append(h('button', { type: 'button', class: 'primary sim-results-btn', onclick: onResults }, 'Results'));
+      }
     },
   };
 }

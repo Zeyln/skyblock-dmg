@@ -120,6 +120,16 @@ function fight(input, opts, skip) {
   };
 
   const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0 } };
+  // The player's stats over the fight, as [low, high] by stat: those of every hit and Terminator shot.
+  const statRanges = {};
+  const trackStats = (totals) => {
+    for (const [k, v] of Object.entries(totals)) {
+      if (typeof v !== 'number') continue;
+      const r = statRanges[k] || (statRanges[k] = [v, v]);
+      r[0] = Math.min(r[0], v);
+      r[1] = Math.max(r[1], v);
+    }
+  };
   const events = [];
   // A hit's event, then one per Ferocity strike: the first FEROCITY_DELAY_S after the hit, the rest
   // FEROCITY_GAP_S apart. Strikes can land after the next hit, so once the fight is done the events
@@ -130,7 +140,7 @@ function fight(input, opts, skip) {
     const from = events.length + 1;
     events.push({ ...ev, ferocity: 0, damage: ev.damage - feroPart });
     for (let k = 0; k < ev.ferocity; k++) {
-      events.push({ t: ev.t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S, feroOnly: true, hit: 0, crit: false, ferocity: 1, swipe: 0,
+      events.push({ t: ev.t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S, feroOnly: true, w: ev.w, hit: 0, crit: false, ferocity: 1, swipe: 0,
         bonuses: [], damage: feroPart / ev.ferocity, maxHp: ev.maxHp, target: ev.target, tid: ev.tid, tidStart: ev.tidStart,
         shielded: ev.shielded, sid: ev.sid });
     }
@@ -235,11 +245,14 @@ function fight(input, opts, skip) {
     const times = [];
     let at = t;
     let breakAt = Infinity;
+    let rolled = 0; // Ferocity strikes from the explosions
+    trackStats({ ...termStats, FEROCITY: termFero });
     for (;;) {
       shots.push(at);
       for (let a = 0; a < TERMINATOR_ARROWS; a++) {
         times.push(at);
         const strikes = Math.floor(termFero / 100) + (random() * 100 < termFero % 100 ? 1 : 0);
+        rolled += strikes;
         for (let k = 0; k < strikes; k++) times.push(at + FEROCITY_DELAY_S + k * FEROCITY_GAP_S);
       }
       times.sort((a, b) => a - b);
@@ -250,7 +263,7 @@ function fight(input, opts, skip) {
     shieldUntil = breakAt;
     // left: the hits left after each hit or strike, for the nametag.
     const left = times.slice(0, hits).map((x, i) => [x, hits - i - 1]);
-    phases.push({ kind: 'shield', start: t, end: shieldUntil, shots, left });
+    phases.push({ kind: 'shield', start: t, end: shieldUntil, shots, left, strikes: rolled });
     blocked.push([t, shieldUntil]);
     playerBusy.push([t, shieldUntil]);
   };
@@ -271,7 +284,9 @@ function fight(input, opts, skip) {
     for (const [s, e] of playerBusy) if (start >= s && start < e) start = e;
     playerBusy.push([start, start + length]);
     blocked.push([start, start + length]);
-    phases.push({ kind, start: phaseStart, end: start + length });
+    const phase = { kind, start: phaseStart, end: start + length };
+    phases.push(phase);
+    return phase;
   };
   let nextHead = null;
   let heads = []; // spawn times of heads still alive
@@ -376,7 +391,7 @@ function fight(input, opts, skip) {
     hitshield: (t) => raiseShield(phases.find((p) => p.kind === 'laser' && t >= p.start && t < p.end)?.end ?? t),
     demonsplit: split,
     callThePups: callPups,
-    webOfLies: (t, f, b) => pause('web', t, WEB_SWAP_S + b.hits * sacShot),
+    webOfLies: (t, f, b) => { pause('web', t, WEB_SWAP_S + b.hits * sacShot).shots = b.hits; },
     beams: (t, f, b) => {
       phases.push({ kind: 'laser', start: t, end: t + b.immune });
       blocked.push([t, t + b.immune]);
@@ -411,7 +426,10 @@ function fight(input, opts, skip) {
       if (x.b.afterShield && x.next !== null && x.next < shieldUntil && t >= x.next) x.next = shieldUntil + x.b.delay;
       while (x.next !== null && t >= x.next && !(x.b.afterShield && shield)) {
         const stop = stopFor(x.b);
-        if (!wipe(x.b, x.next)) pause(x.b.row, x.next + (x.b.hitFor || 0), stop, x.next);
+        if (!wipe(x.b, x.next)) {
+          const p = pause(x.b.row, x.next + (x.b.hitFor || 0), stop, x.next);
+          if (x.b.stop?.hits) p.hits = x.b.stop.hits; // hits on it (a Fire Pillar)
+        }
         x.next += x.b.every;
       }
     }
@@ -481,6 +499,7 @@ function fight(input, opts, skip) {
     const toss = input.pet?.id === 'GOLEM' && n % 5 === 0 && t - lastToss >= 5;
     if (toss) lastToss = t;
     const r = hitResult(n, stacks, w, toss);
+    trackStats(r.totals);
     // The second dagger may swing at its own speed.
     const step = w && !bow ? meleeHitTicks(r.totals.ATTACK_SPEED || 0) : ticksPerHit;
     const bonuses = [...r.procs];
@@ -508,7 +527,7 @@ function fight(input, opts, skip) {
       shield.times.push(t);
       for (let k = 0; k < strikes; k++) shield.times.push(t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S);
       if (shield.times.length >= shield.hits) shield.breakAt = [...shield.times].sort((a, b) => a - b)[shield.hits - 1];
-      record({ t, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, sid: shield, tid: 'boss', tidStart: startHp }, 0);
+      record({ t, w, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, sid: shield, tid: 'boss', tidStart: startHp }, 0);
       tick += ticksPerHit;
       continue;
     }
@@ -553,7 +572,7 @@ function fight(input, opts, skip) {
           showSplit(t, other.name);
         }
       }
-      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name, tid: demon, tidStart: demon.maxHp }, feroPart);
+      record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name, tid: demon, tidStart: demon.maxHp }, feroPart);
       tick += step;
       continue;
     }
@@ -566,7 +585,7 @@ function fight(input, opts, skip) {
           showPups(t, null);
         } else showPups(t, `${killed} of ${pups.length} pups killed`);
       }
-      record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup', tid: pup, tidStart: pup.maxHp }, feroPart);
+      record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup', tid: pup, tidStart: pup.maxHp }, feroPart);
       tick += step;
       continue;
     }
@@ -580,7 +599,7 @@ function fight(input, opts, skip) {
       attuneHits = 0;
       attune = (attune + 1) % HELLION_ORDER.length;
     }
-    const struck = record({ t, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
+    const struck = record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
       ...(broodOn ? { target: 'Conjoined Brood', tid: 'brood', tidStart: maxHp } : { tid: 'boss', tidStart: startHp }) }, feroPart);
     if (maxHp) {
       bossStrikes.push(...struck.slice(1));
@@ -664,7 +683,9 @@ function fight(input, opts, skip) {
   return {
     mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp,
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
-    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics,
+    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics, statRanges,
+    // The weapons by event w (the main one, then a second dagger), and the Terminator if one was used.
+    weaponNames: weapons.map((x) => x.item.name), terminatorName: terminator ? input.terminator?.name || 'Terminator' : null,
     // Every phase this boss can have, whether or not this fight got to it (for the indicator).
     phaseKinds: phaseKinds(blocks, { weapons: weapons.length }),
   };

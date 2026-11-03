@@ -631,3 +631,34 @@ describe('mechanic blocks', () => {
     expect(ENEMIES.filter((e) => e.blocks.includes(SLAYER_DESPAWN)).length).toBeGreaterThan(5);
   });
 });
+
+describe('results screen', () => {
+  it('counts hits per weapon, procs, highest and lowest hit, and stat changes', async () => {
+    const { summarize } = await import('./simResults.js');
+    const seraph = { enemy: 'Voidgloom Seraph IV', maxHp: 210e6, mobs: ['Ender'], families: ['Enderman'], boss: true };
+    const vorpal = { id: 'VORPAL_KATANA', name: 'Vorpal Katana', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 3e6 } };
+    const terminator = { id: 'TERMINATOR', name: 'Terminator', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 310, ATTACK_SPEED: 40, FEROCITY: 100 } };
+    const s = simulate(noCrit({ item: vorpal }, { target: seraph, terminator }), { mode: 'kill' });
+    const r = summarize(s);
+    expect(r.outcome).toBe('killed');
+    expect(r.timeToKill).toBe(s.killedAt);
+    const melee = r.hitsByWeapon.find((x) => x.name === 'Vorpal Katana');
+    expect(melee.count).toBe(s.events.filter((e) => !e.feroOnly).length);
+    expect(r.hitsByWeapon.find((x) => x.name === 'Terminator').unit).toBe('shots');
+    expect(r.swaps).toBe(2 * s.phases.filter((p) => p.kind === 'shield').length);
+    expect(r.ferocityProcs).toBe(s.events.filter((e) => e.feroOnly).length + s.phases.reduce((n, p) => n + (p.strikes || 0), 0));
+    expect(r.highestHit).toBeGreaterThanOrEqual(r.lowestHit);
+    // Soulcry carried to the Terminator: its Ferocity is part of the fight's range.
+    const fero = r.statChanges.find((x) => x.stat === 'FEROCITY');
+    expect(fero.high - fero.low).toBeGreaterThan(0);
+    expect(r.lowestEnemyPct).toBeNull();
+  });
+
+  it('a failed fight reports the lowest enemy health', async () => {
+    const { summarize } = await import('./simResults.js');
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 100 }) }, { target: { enemy: 'Revenant Horror IV', maxHp: 1.5e6, mobs: ['Undead'], boss: true } }), { mode: 'kill' });
+    const r = summarize(s);
+    expect(r.outcome).toBe('failed');
+    expect(r.lowestEnemyPct).toBeCloseTo(Math.min(...s.events.map((e) => e.hp)) / 1.5e6 * 100);
+  });
+});

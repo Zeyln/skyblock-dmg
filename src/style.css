@@ -792,6 +792,39 @@ button.primary:hover { color: var(--on-accent); }
 @media (prefers-reduced-motion: reduce) { .sim-pop { animation: sim-pop-still .9s steps(1) forwards; } @keyframes sim-pop-still { to { opacity: 0; } } }
 
 .sim-graph { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Shown on the graph once the fight is over. */
+.sim-results-btn { position: absolute; top: 6px; left: 58px; z-index: 1; }
+
+/* Results screen: in place of the simulation, fitted to the window (no scrolling). A report on the
+   window's own surface: hierarchy from type and thin rules, no boxed panels. */
+.sim-report { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: clamp(14px, 2.6vh, 28px); }
+.sim-report-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 32px; padding-bottom: clamp(12px, 2vh, 20px); border-bottom: 1px solid var(--line); }
+.sim-report-head > .ghost { margin-left: auto; align-self: flex-start; }
+.sim-report-title { display: flex; flex-direction: column; gap: 4px; }
+.sim-outcome { align-self: flex-start; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.sim-outcome.killed { color: var(--good-ink); }
+.sim-outcome.failed { color: var(--crit); }
+.sim-headline-label { font-size: 12px; color: var(--muted); }
+.sim-headline { font-size: clamp(28px, 4.4vh, 44px); font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.sim-figures { display: flex; flex-wrap: wrap; }
+.sim-figure { display: flex; flex-direction: column; gap: 4px; padding: 0 24px; border-left: 1px solid var(--line); }
+.sim-figure span { font-size: 12px; color: var(--muted); }
+.sim-figure b { font-size: clamp(17px, 2.4vh, 24px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sim-report-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; align-content: start; }
+.sim-report-cols > * { min-width: 0; display: flex; flex-direction: column; gap: clamp(14px, 2.4vh, 24px); }
+.sim-report-block h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.sim-report-block dl { margin: 0; }
+.sim-report-block dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.sim-report-block dt { min-width: 0; }
+.sim-report-block dt small { display: block; margin-top: 1px; font-size: 11px; color: var(--faint); }
+.sim-report-block dd { margin: 0; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+.sim-report-block p { margin: 0; padding: 6px 0; font-size: 13px; color: var(--faint); }
+.sim-muted { color: var(--faint); }
+.sim-stat-range { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.sim-stat-range th, .sim-stat-range td { padding: 6px 0 6px 16px; text-align: right; border-bottom: 1px solid var(--line); }
+.sim-stat-range th:first-child { text-align: left; padding-left: 0; font-weight: 400; }
+.sim-stat-range thead th { padding-top: 0; font-size: 11px; font-weight: 600; color: var(--faint); }
+@media (max-width: 900px) { .sim-report-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 24px; } }
 .sim-graph-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; font-size: 12px; color: var(--muted); }
 .sim-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .sim-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }

@@ -9,6 +9,7 @@ import { detectSets, evaluateSets } from './data/sets.js';
 import { simulate } from './sim.js';
 import { createSimGraphic } from './simGraphic.js';
 import { PHASE_LABELS } from './bossMechanics.js';
+import { summarize } from './simResults.js';
 import { mobSprite } from './data/mobSprites.js';
 import {
   PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
@@ -1637,7 +1638,11 @@ function renderSim(body, startDelay = 0) {
     show();
     if (i >= events.length && clock >= fightEnd) {
       for (const { row } of phaseRows) row.classList.remove('on');
-      graphic?.finish();
+      // The Results button (graph, top left) swaps the simulation for its results, and back.
+      graphic?.finish(() => {
+        const sim = [...body.childNodes];
+        body.replaceChildren(renderSimResults(s, () => body.replaceChildren(...sim)));
+      });
       stopSimPlayback();
       playBtn.disabled = true;
       playBtn.textContent = s.killedAt !== null ? 'Killed' : s.despawned ? 'Failed' : 'Done';
@@ -1645,6 +1650,59 @@ function renderSim(body, startDelay = 0) {
   };
   show();
   simTimer = setInterval(frame, 16);
+}
+
+// The results of a finished fight (simResults.js), in place of the simulation; back() returns to it.
+// A report: the outcome and headline figures on top, then columns of label / value rows.
+function renderSimResults(s, back) {
+  const r = summarize(s);
+  const secs = (t) => `${fmt(t, 2)} s`;
+  const outcome = { killed: 'Killed', failed: 'Failed', alive: 'Alive' }[r.outcome];
+  const headline = r.outcome === 'killed' ? ['Time to kill', secs(r.timeToKill)]
+    : [r.outcome === 'failed' ? 'Despawned after' : 'Still alive after', secs(r.seconds)];
+  const figure = (label, value) => h('div', { class: 'sim-figure' }, h('span', {}, label), h('b', {}, value));
+  // rows: [label, value, note?]; empty: the line shown when there are none.
+  const block = (title, rows, empty) => h('section', { class: 'sim-report-block' }, h('h4', {}, title),
+    rows.length ? h('dl', {}, rows.map(([k, v, note]) => h('div', {}, h('dt', {}, k, note ? h('small', {}, note) : ''), h('dd', {}, v))))
+      : h('p', {}, empty));
+  const statName = (stat) => STAT_LABELS[stat] || stat.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+  const statValue = (stat, v) => fmt(v, /CRITICAL_CHANCE|ATTACK_SPEED/.test(stat) ? 1 : 0);
+  const stats = h('section', { class: 'sim-report-block' }, h('h4', {}, 'Stats during the fight'),
+    r.statChanges.length ? h('table', { class: 'sim-stat-range' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Stat'), h('th', {}, 'Low'), h('th', {}, 'High'))),
+      h('tbody', {}, r.statChanges.map(({ stat, low, high }) => h('tr', {},
+        h('th', {}, statName(stat)), h('td', {}, statValue(stat, low)), h('td', {}, statValue(stat, high))))))
+      : h('p', {}, 'No stat changed during the fight.'));
+  const notYet = () => h('span', { class: 'sim-muted' }, 'Not simulated yet');
+
+  return h('div', { class: 'sim-report' },
+    h('header', { class: 'sim-report-head' },
+      h('div', { class: 'sim-report-title' },
+        h('span', { class: `sim-outcome ${r.outcome}` }, outcome),
+        h('span', { class: 'sim-headline-label' }, headline[0]),
+        h('b', { class: 'sim-headline' }, headline[1])),
+      h('div', { class: 'sim-figures' },
+        figure('Average damage / s', fmt(r.dps)),
+        figure('Highest hit', r.highestHit === null ? '—' : fmt(r.highestHit)),
+        figure('Lowest hit', r.lowestHit === null ? '—' : fmt(r.lowestHit)),
+        r.lowestEnemyPct !== null ? figure('Lowest enemy health', `${fmt(r.lowestEnemyPct, 1)}%`) : ''),
+      h('button', { type: 'button', class: 'ghost', onclick: back }, 'Back to simulation')),
+    h('div', { class: 'sim-report-cols' },
+      h('div', {},
+        block(r.outcome === 'killed' ? 'Hits to kill' : 'Hits', [
+          ...r.hitsByWeapon.map((x) => [x.name, `${fmt(x.count)} ${x.unit}`, x.note]),
+          ['Weapon / item swaps', fmt(r.swaps)],
+        ])),
+      // Ferocity and Swipe, then every other bonus on its own, most often first.
+      h('div', {}, block('Procs and bonuses', [
+        ['Ferocity procs', fmt(r.ferocityProcs)],
+        ['Swipe procs', fmt(r.swipeProcs)],
+        ...r.bonusProcs.map((x) => [x.name, fmt(x.count)]),
+      ])),
+      h('div', {},
+        stats,
+        // Health and incoming damage aren't simulated yet (God mode).
+        block('Player', [['Highest damage taken', notYet()], ['Damage absorbed', notYet()], ['Lowest health', notYet()]]))));
 }
 
 // Keep layout offsets in sync with the header and the corner damage panel (their heights vary
