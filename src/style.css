@@ -748,8 +748,10 @@ button.primary:hover { color: var(--on-accent); }
 /* Middle of the simulation: the target with its damage numbers, and the damage graph beside it. */
 .sim-visual { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(140px, 0.7fr) minmax(0, 1.6fr); gap: 16px; align-items: center; }
 /* The top padding keeps room for one nametag line, so the name isn't cut off by the panel edge. */
-.sim-target { display: flex; flex-direction: column; align-items: center; min-width: 0; padding-top: 26px; }
-.sim-dummy-wrap { position: relative; width: 100%; max-width: 220px; aspect-ratio: 1; }
+.sim-target { display: flex; flex-direction: column; align-items: center; min-width: 0; padding-top: clamp(26px, calc(2.78vh - 4px), 58px); }
+/* Grows with the screen height, in a straight line from 220px at 1080p to 650px at 4K (100% scaling),
+   220px below 1080p. The nametag and damage numbers scale with it (cqi: 1% of its width). */
+.sim-dummy-wrap { position: relative; width: 100%; max-width: clamp(220px, calc(39.8vh - 210px), 650px); aspect-ratio: 1; container-type: inline-size; }
 .sim-dummy { position: absolute; inset: 25% 20% 0; width: 60%; height: 75%; }
 .sim-dummy .head, .sim-dummy .body, .sim-dummy .arm { fill: var(--muted); }
 .sim-dummy .post, .sim-dummy .base { fill: var(--faint); }
@@ -766,7 +768,7 @@ button.primary:hover { color: var(--on-accent); }
   --tag-5: #aa00aa; --tag-7: #aaaaaa;
   position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); z-index: 1; visibility: hidden;
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 8px;
-  width: max-content; white-space: nowrap; background: rgba(0, 0, 0, .45); font-size: 13px; line-height: 1.2; text-align: center;
+  width: max-content; white-space: nowrap; background: rgba(0, 0, 0, .45); font-size: clamp(13px, 6cqi, 39px); line-height: 1.2; text-align: center;
   pointer-events: none;
 }
 :root[data-theme="dark"] .sim-nametag { background: rgba(0, 0, 0, .35); }
@@ -781,7 +783,7 @@ button.primary:hover { color: var(--on-accent); }
 
 /* Damage numbers float up and fade (no fade when motion is reduced: they just appear and go). */
 .sim-pops { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-.sim-pop { position: absolute; transform: translateX(-50%); font-size: 13px; white-space: nowrap; animation: sim-pop .9s ease-out forwards; }
+.sim-pop { position: absolute; transform: translateX(-50%); font-size: clamp(13px, 6cqi, 39px); white-space: nowrap; animation: sim-pop .9s ease-out forwards; }
 .sim-pop.hit { color: var(--mc-7); }
 .sim-pop.ferocity { color: var(--mc-c); }
 .sim-pop.lightning { color: var(--mc-e); }
