@@ -63,5 +63,7 @@ export function summarize(s) {
     // The mana pool's lowest point, when the ability was cast.
     lowestMana: s.lowestMana ?? null,
     maxMana: s.maxMana,
+    // Time the cast's cooldown was up but its mana wasn't (null when nothing was cast).
+    manaWait: s.manaWaitSeconds ?? null,
   };
 }

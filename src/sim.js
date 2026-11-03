@@ -98,6 +98,9 @@ function fight(input, opts, skip) {
   let mana = maxMana;
   let manaSec = 0;
   let lowestMana = mana;
+  // The windows spent waiting on mana: the cast's cooldown was up but its mana wasn't there yet.
+  const manaWaits = [];
+  let starvedFrom = null;
   const manaTo = (t) => {
     const secs = Math.floor(t + 1e-9) - manaSec;
     if (secs > 0) {
@@ -125,7 +128,8 @@ function fight(input, opts, skip) {
     return Math.max(nextCast, at);
   };
   // The next tick something is due (never before now).
-  const wake = (tick) => Math.max(tick, Math.min(swinging ? nextSwing : Infinity, casting ? castReady() : Infinity, dots.length ? dots[0] : Infinity));
+  const wake = (tick) => Math.max(tick, Math.min(swinging ? nextSwing : Infinity, casting ? castReady() : Infinity,
+    casting && nextCast > tick ? nextCast : Infinity, dots.length ? dots[0] : Infinity));
 
   // Weapons the player swaps between: the main one, and a second Blaze Slayer dagger (input.weapon2).
   const weapons = [input.weapon, input.weapon2].filter((w) => w?.item);
@@ -498,6 +502,14 @@ function fight(input, opts, skip) {
     // What happens now: a tick of damage over time lands (it isn't the player's action), a cast goes
     // off, or a melee hit; with nothing due yet, wait for the next.
     manaTo(t);
+    if (casting) {
+      const short = mana < costAt(tick) - 1e-9;
+      if (starvedFrom === null && tick >= nextCast && short) starvedFrom = t;
+      else if (starvedFrom !== null && !short) {
+        manaWaits.push([starvedFrom, t]);
+        starvedFrom = null;
+      }
+    }
     const action = dots.length && dots[0] <= tick ? 'dot'
       : casting && tick >= castReady() ? 'cast'
         : swinging && tick >= nextSwing ? 'swing' : null;
@@ -780,6 +792,12 @@ function fight(input, opts, skip) {
   const lastHp = [...events].reverse().find((e) => e.tid === lastTid);
   if (lastHp) hp = lastHp.hp;
   if (shield) phases.push({ kind: 'shield', start: shield.start, end: Math.min(shield.breakAt ?? seconds, seconds) });
+  // The waits on mana within the fight.
+  if (casting) {
+    if (starvedFrom !== null) manaWaits.push([starvedFrom, seconds]);
+    for (const w of manaWaits) w[1] = Math.min(w[1], seconds);
+    for (let i = manaWaits.length - 1; i >= 0; i--) if (manaWaits[i][0] >= seconds) manaWaits.splice(i, 1);
+  }
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
   for (let i = phases.length - 1; i >= 0; i--) if (phases[i].start >= seconds && scheduled.includes(phases[i])) phases.splice(i, 1); // never got to it
@@ -803,6 +821,8 @@ function fight(input, opts, skip) {
     hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics, statRanges,
     // The ability, if cast: its name, and the mana pool and its lowest point.
     attack: casting ? attack : 'left', spellName: spell?.name || null, maxMana, lowestMana: casting ? lowestMana : null,
+    manaWaits: casting ? manaWaits : null,
+    manaWaitSeconds: casting ? manaWaits.reduce((sum, [a, b]) => sum + b - a, 0) : null,
     // The weapons by event w (the main one, then a second dagger), and the Terminator if one was used.
     weaponNames: weapons.map((x) => x.item.name), terminatorName: terminator ? input.terminator?.name || 'Terminator' : null,
     // Every phase this boss can have, whether or not this fight got to it (for the indicator).

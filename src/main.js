@@ -1770,6 +1770,7 @@ function renderSimResults(s, back) {
         figure('Highest hit', r.highestHit === null ? '—' : fmt(r.highestHit)),
         figure('Lowest hit', r.lowestHit === null ? '—' : fmt(r.lowestHit)),
         r.lowestMana !== null ? figure('Lowest mana', `${fmt(r.lowestMana)} of ${fmt(r.maxMana)}`) : '',
+        r.manaWait !== null ? figure('Time waiting on mana', `${fmt(r.manaWait, 1)} s · ${fmt(r.seconds ? r.manaWait / (r.timeToKill ?? r.seconds) * 100 : 0)}%`) : '',
         r.lowestEnemyPct !== null ? figure('Lowest enemy health', `${fmt(r.lowestEnemyPct, 1)}%`) : ''),
       h('button', { type: 'button', class: 'ghost', onclick: back }, 'Back to simulation')),
     h('div', { class: 'sim-report-cols' },

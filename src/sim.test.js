@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { simulate } from './sim.js';
 import { calculate } from './calc.js';
+import { summarize } from './simResults.js';
 import { meleeHitTicks, shortbowTicks } from './data/mechanics.js';
 import { petNumbers, cleanLore } from './data/pets.js';
 
@@ -633,8 +634,7 @@ describe('mechanic blocks', () => {
 });
 
 describe('results screen', () => {
-  it('counts hits per weapon, procs, highest and lowest hit, and stat changes', async () => {
-    const { summarize } = await import('./simResults.js');
+  it('counts hits per weapon, procs, highest and lowest hit, and stat changes', () => {
     const seraph = { enemy: 'Voidgloom Seraph IV', maxHp: 210e6, mobs: ['Ender'], families: ['Enderman'], boss: true };
     const vorpal = { id: 'VORPAL_KATANA', name: 'Vorpal Katana', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 3e6 } };
     const terminator = { id: 'TERMINATOR', name: 'Terminator', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 310, ATTACK_SPEED: 40, FEROCITY: 100 } };
@@ -654,8 +654,7 @@ describe('results screen', () => {
     expect(r.lowestEnemyPct).toBeNull();
   });
 
-  it('a failed fight reports the lowest enemy health', async () => {
-    const { summarize } = await import('./simResults.js');
+  it('a failed fight reports the lowest enemy health', () => {
     const s = simulate(noCrit({ item: sword({ DAMAGE: 100 }) }, { target: { enemy: 'Revenant Horror IV', maxHp: 1.5e6, mobs: ['Undead'], boss: true } }), { mode: 'kill' });
     const r = summarize(s);
     expect(r.outcome).toBe('failed');
@@ -754,5 +753,29 @@ describe('mana in the fight', () => {
     const plain = run({});
     expect(run({ deployable: 'PLASMAFLUX' })).toBeGreaterThan(plain);
     expect(run({ enchants: { mana_steal: 3 } })).toBeGreaterThan(plain);
+  });
+});
+
+describe('waiting on mana', () => {
+  const hype = sword({ DAMAGE: 260, INTELLIGENCE: 2000 }, { id: 'HYPERION', dungeon_item: true });
+  const run = (item, extra = {}) => simulate(noCrit({ item, attack: 'right' }, { target: { maxHp: 1e12 }, ...extra }), { mode: 'duration', duration: 20 });
+
+  it('waiting on mana: from the cooldown being up to the mana being there', () => {
+    const s = run(hype);
+    // Dry at 0.9 s; the cooldown is up at 1.05 s, the 300 mana at 8 s (42 a second); and so on.
+    expect(s.manaWaits).toEqual([[1.05, 8], [8.15, 15], [15.15, 20]]);
+    expect(s.manaWaitSeconds).toBeCloseTo(18.65);
+    expect(summarize(s).manaWait).toBeCloseTo(18.65);
+  });
+
+  it('no wait when the cooldown is what limits', () => {
+    const yeti = sword({ DAMAGE: 150, INTELLIGENCE: 100000, WEAPON_ABILITY_DAMAGE: 15000 }, { id: 'YETI_SWORD' });
+    expect(run(yeti).manaWaitSeconds).toBe(0);
+  });
+
+  it('nothing to show without casting', () => {
+    const s = simulate(noCrit({ item: hype }, { target: { maxHp: 1e12 } }), { mode: 'duration', duration: 5 });
+    expect(s.manaWaits).toBe(null);
+    expect(summarize(s).manaWait).toBe(null);
   });
 });
