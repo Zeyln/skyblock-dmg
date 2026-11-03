@@ -11,6 +11,9 @@ import {
 import { REFORGE_STONES } from './data/reforgeStones.js';
 import { applyPet } from './data/pets.js';
 import { detectSets, evaluateSets } from './data/sets.js';
+import { weaponAbility, greedBase, NOT_ON_ABILITIES, mageStats, mageBeamMult, mageCooldownPct, BASE_MANA, MANA_REGEN_PCT } from './data/abilities.js';
+import { enemyBlocks } from './data/mechanics.js';
+import { magicResistPct, bowImmune } from './bossMechanics.js';
 
 export const DAMAGE_STATS = ['DAMAGE', 'STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE'];
 
@@ -122,6 +125,9 @@ function pieceSources(piece, kind, input, statPct) {
   // Price-paid bonus (Midas' Sword) is part of the item's stats, so stars scale it too.
   const greed = PRICE_ITEMS[item.id] ? greedBonus(item.id, piece.price) : 0;
   if (greed) addStats(unstarred, { DAMAGE: greed, STRENGTH: greed });
+  // The base ability damage (WEAPON_ABILITY_DAMAGE): the API's, a Wither scroll's, or Greed's (Midas Staff).
+  const spell = kind === 'weapon' ? weaponAbility(piece) : null;
+  if (spell && (spell.greed || !unstarred.WEAPON_ABILITY_DAMAGE)) unstarred.WEAPON_ABILITY_DAMAGE = greedBase(spell, piece.price);
   const base = {};
   for (const [k, v] of Object.entries(unstarred)) {
     base[k] = v * (k === 'CRITICAL_CHANCE' ? qualityMult * (1 + starBonus) : scale);
@@ -190,7 +196,11 @@ export function calculate(input) {
   }
   const player = { maxHp: 0, fullHealth: true, lowHealth: false, recentlyHit: false, firstHit: true, ...input.player };
   const weapon = input.weapon || {};
-  const bow = isBow(weapon.item);
+  // damageType 'magic': the weapon's right-click ability (data/abilities.js) instead of its hit: Magic
+  // Damage, which doesn't crit, and which melee- and bow-only bonuses don't affect.
+  const spell = input.damageType === 'magic' ? weaponAbility(weapon) : null;
+  const magic = !!spell;
+  const bow = isBow(weapon.item) && !magic;
   const sources = []; // { label, stats } for the stat breakdown
   const additive = []; // { label, value }
   const multiplicative = []; // { label, value }
@@ -199,7 +209,8 @@ export function calculate(input) {
   // --- Stats ---
   sources.push({ label: 'Base player stats', stats: { ...BASE_PLAYER_STATS } });
 
-  if (weapon.item) sources.push(...pieceSources(weapon, 'weapon', input, statPct));
+  const weaponSources = weapon.item ? pieceSources(weapon, 'weapon', input, statPct) : [];
+  sources.push(...weaponSources);
   // Weapon ability kept active through the fight (Soulcry), unless switched off.
   const ability = WEAPON_ABILITIES[weapon.item?.id];
   if (ability && weapon.abilityOn !== false && ability.families.some((f) => target.families.includes(f))) {
@@ -218,7 +229,7 @@ export function calculate(input) {
 
   // Pet
   const pet = applyPet(input.pet, {
-    target, player, bow, weaponId: weapon.item?.id, inDungeon: !!input.dungeonMode && input.dungeonMode !== 'none', extras: input.petExtras || {},
+    target, player, bow, magic, weaponId: weapon.item?.id, inDungeon: !!input.dungeonMode && input.dungeonMode !== 'none', extras: input.petExtras || {},
   });
   sources.push(...pet.sources);
   additive.push(...pet.additive);
@@ -279,6 +290,7 @@ export function calculate(input) {
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
     if (ench.sim === 'lightning') { lightningPct = v; continue; } // every 3rd hit, simulation only
     if (ench.overload) { overloadPct = v; continue; } // applied to crits below
+    if (magic && NOT_ON_ABILITIES.includes(ench.id)) continue;
     if (!hitsMob(ench.mobs, target)) continue;
     // The simulation passes the hit's number; a single hit uses the First hit(s) setting.
     if (ench.firstHit && !(hitNumber ? hitNumber === 1 : player.firstHit)) continue;
@@ -328,8 +340,8 @@ export function calculate(input) {
     const label = `${s.name} ${roman(lvl)} (${s.shard} Shard)`;
     if (s.kind === 'stat') { sources.push({ label, stats: { [s.stat]: v } }); continue; }
     if (s.kind === 'statPct') { statPct[s.stat] = (statPct[s.stat] || 0) + v; continue; }
-    if (s.melee && bow) continue;
-    if (s.bow && !bow) continue;
+    if (s.melee && (bow || magic)) continue;
+    if (s.bow && !bow) continue; // (magic counts as neither)
     if (!hitsMob(s.mobs, target)) continue;
     if (s.bossOnly && !target.boss) continue;
     if (s.fullHealth && !player.fullHealth) continue;
@@ -366,14 +378,15 @@ export function calculate(input) {
   const dClass = input.dungeonClass;
   const dungeonFight = input.dungeonMode === 'catacombs' || input.dungeonMode === 'master';
   if (dClass?.id && dungeonFight) {
-    const pct = classDamageBonus(dClass.id, dClass.level, bow, dClass.solo);
+    const pct = magic ? 0 : classDamageBonus(dClass.id, dClass.level, bow, dClass.solo);
     const name = DUNGEON_CLASSES.find((c) => c.id === dClass.id)?.name;
     const lvl = Math.max(0, Math.min(CLASS_MAX_LEVEL, Math.floor(dClass.level || 0)));
-    if (pct) {
+    if (dClass.id === 'mage') sources.push({ label: `Mage ${lvl}`, stats: mageStats(lvl) });
+    if (magic) { /* class passives are melee or arrow damage */ } else if (pct) {
       multiplicative.push({ label: `${name} ${lvl}${dClass.solo ? ' (no dupes ×2)' : ''}: ${bow ? 'arrow' : 'melee'} damage`, value: 1 + pct / 100 });
-    } else notes.push(`${name} has no ${bow ? 'bow' : 'melee'} damage passive.`);
+    } else if (dClass.id !== 'mage') notes.push(`${name} has no ${bow ? 'bow' : 'melee'} damage passive.`);
     // Berserk Lust for Blood: each earlier melee hit on this enemy adds 3% per level (additive), capped.
-    if (dClass.id === 'berserk' && !bow && hitNumber > 1) {
+    if (dClass.id === 'berserk' && !bow && !magic && hitNumber > 1) {
       const stack = Math.min(lustForBloodCap(lvl), (hitNumber - 1) * LUST_FOR_BLOOD_PER_LEVEL * lvl);
       if (stack) additive.push({ label: `Lust for Blood (${hitNumber - 1} hits)`, value: stack });
     }
@@ -410,7 +423,7 @@ export function calculate(input) {
   // Speed so far (base 100 plus gear, pet, reforges…), for the Warden Helmet.
   const speed = 100 + sources.reduce((a, src) => a + (src.stats.WALK_SPEED || 0), 0);
   const sets = evaluateSets(detected, {
-    bow, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
+    bow, magic, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
     inDungeon: input.dungeonMode === 'catacombs' || input.dungeonMode === 'master',
   }, input.setInputs);
   sources.push(...sets.sources);
@@ -445,7 +458,7 @@ export function calculate(input) {
   // --- Totals ---
   const totals = {};
   for (const s of sources) addStats(totals, s.stats);
-  for (const stat of ['STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE']) {
+  for (const stat of ['STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE', 'INTELLIGENCE', 'ABILITY_DAMAGE_PERCENT']) {
     const pct = (statPct[stat] || 0) + (statPct.__all || 0);
     if (pct) totals[stat] = (totals[stat] || 0) * (1 + pct / 100);
   }
@@ -454,6 +467,13 @@ export function calculate(input) {
     const extra = fn({ ...totals });
     addStats(totals, extra);
     sources.push({ label, stats: extra });
+  }
+  const intelligence = totals.INTELLIGENCE || 0;
+  const abilityDamage = totals.ABILITY_DAMAGE_PERCENT || 0;
+  const mage = dungeonFight && dClass?.id === 'mage' ? Math.max(0, Math.min(CLASS_MAX_LEVEL, Math.floor(dClass.level || 0))) : null;
+  // Mage Staff: as a Mage in dungeons, melee attacks are a beam dealing a share of the hit (by Intelligence).
+  if (mage !== null && !bow && !magic && weapon.item) {
+    multiplicative.push({ label: `Mage Staff beam (${Math.round(intelligence)} Intelligence)`, value: mageBeamMult(intelligence) });
   }
   const damage = totals.DAMAGE || 0;
   const strength = totals.STRENGTH || 0;
@@ -482,6 +502,38 @@ export function calculate(input) {
   const expected = nonCrit + ((crit - nonCrit) + (megaCrit - crit) * megaChance / 100) * critChance / 100;
   if (soulEaterStr) notes.push(`Soul Eater adds +${Math.round(soulEaterStr)} Strength to the crit hit only.`);
 
+  const arrowImmune = bowImmune(enemyBlocks(target.enemy));
+  if (bow && arrowImmune) notes.push(`${target.enemy} is immune to bow damage.`);
+
+  // Mana (wiki, Mana): 100 + Intelligence, 2% of it back a second.
+  const maxMana = BASE_MANA + Math.max(0, intelligence);
+  const manaRegen = maxMana * MANA_REGEN_PCT / 100;
+  // The ability's Magic Damage (wiki, Damage Calculation › Ability Damage):
+  // Base × (1 + Intelligence/100 × Scaling) × (1 + Ability Damage/100) × Additive × Multiplicative,
+  // then magic resistance and defense. A damage-over-time ability's base is spread over its seconds.
+  let cast = null;
+  if (magic) {
+    const base = weaponSources[0]?.stats.WEAPON_ABILITY_DAMAGE ?? greedBase(spell, weapon.price);
+    const perTick = spell.over && !spell.perSecond ? base / spell.over : base;
+    const intMult = 1 + intelligence / 100 * spell.scaling;
+    const adMult = 1 + abilityDamage / 100;
+    const addMult = spell.noAdditive ? 1 : additiveMult;
+    const resist = spell.melee ? 0 : magicResistPct(enemyBlocks(target.enemy));
+    const resistMult = 1 - resist / 100;
+    const hit = Math.floor(perTick * intMult * adMult * addMult * multMult * resistMult * defenseMult);
+    const wise = ult?.id === 'ultimate_wise' ? ult.values[Math.min(Math.max(1, weapon.ultimate.level || 1), ult.values.length) - 1] : 0;
+    const cdr = mage !== null && !spell.fixedCooldown ? mageCooldownPct(mage) : 0;
+    cast = {
+      name: spell.name, base, perTick, scaling: spell.scaling, intMult, adMult, additiveMult: addMult, resist, resistMult,
+      hit, over: spell.over || 0, melee: !!spell.melee, noAdditive: !!spell.noAdditive,
+      manaCost: spell.mana * (1 - wise / 100), wisePct: wise,
+      cooldown: spell.cooldown * (1 - cdr / 100), cooldownPct: cdr,
+    };
+    if (resist >= 100) notes.push(`${target.enemy} is immune to Magic Damage: ${spell.name} deals nothing.`);
+    else if (resist) notes.push(`${target.enemy} takes ${resist}% less Magic Damage.`);
+    if (spell.noAdditive) notes.push(`${spell.name} isn't affected by the Additive Multiplier.`);
+  }
+
   return {
     bow, totals, sources, additive, multiplicative, notes, petAbilities: pet.abilities, setStatus: sets.status,
     damage, strength, critDamage, critChance, soulEaterStr,
@@ -492,6 +544,11 @@ export function calculate(input) {
     baseDamage, strengthMult, initial, additiveMult, multMult, critMult, defense, defenseMult,
     targetMaxHp: target.maxHp, lightningPct, speed,
     nonCrit, crit, expected, megaCrit, megaChance, overloadPct,
+    // An enemy immune to bows takes nothing from arrows.
+    ...(bow && arrowImmune ? { nonCrit: 0, crit: 0, expected: 0, megaCrit: 0 } : {}),
+    intelligence, abilityDamage, maxMana, manaRegen, mage,
+    // Magic Damage (damageType 'magic'): the ability's hit, which never crits.
+    ability: cast, ...(cast ? { nonCrit: cast.hit, crit: cast.hit, expected: cast.hit, megaCrit: cast.hit, critChance: 0, megaChance: 0 } : {}),
   };
 }
 

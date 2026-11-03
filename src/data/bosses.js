@@ -145,6 +145,11 @@ export const outlawSpecials = block('outlawSpecials'); // OUTLAW
 //   note: a line for the fight's notes
 export const wipeTimer = block('wipeTimer');
 export const enrage = block('enrage'); // REVENANT_ENRAGE
+// Takes pct% less Magic Damage (100: immune). Abilities that count as melee (Giant's Slam) get through.
+export const magicResist = (pct) => ({ kind: 'magicResist', pct });
+export const MAGIC_IMMUNE = magicResist(100);
+// Bow (arrow) damage does nothing.
+export const BOW_IMMUNE = { kind: 'bowImmune' };
 
 // Shared blocks.
 export const SLAYER_DESPAWN = despawn(180);
@@ -162,13 +167,15 @@ export const voidgloomBlocks = (t) => [
   t >= 2 && nukekubiHeads({ from: 1 / 3, every: 6 }),
 ].filter(Boolean);
 export const revenantBlocks = (t) => [SLAYER_DESPAWN, t >= 2 && enrage(REVENANT_ENRAGE)].filter(Boolean);
-export const ATONED_BLOCKS = [SLAYER_DESPAWN, regen(ATONED_REGEN), wipeTimer({
+// Revenant Horror V (wiki): "Heals rapidly and is immune to magic damage."
+export const ATONED_BLOCKS = [SLAYER_DESPAWN, MAGIC_IMMUNE, regen(ATONED_REGEN), wipeTimer({
   row: 'boom', label: 'Thermonuclear', name: 'Thermonuclear lightning', tag: ['Boom!', 'c', true],
   at: 0, delay: ATONED_BOOM.every, every: ATONED_BOOM.every, hitFor: ATONED_BOOM.hitUntil,
   stop: ATONED_BOOM.out + ATONED_BOOM.barrage + ATONED_BOOM.back, wipe: 5,
   note: 'Thermonuclear every 30 s (assumed from spawn): hits for 4.5 s of its 5 s countdown, then 2 s out of range (assumed); TNT heals are left out (dodged)',
 })];
-export const svenBlocks = (t) => (t >= 2 ? [callThePups({ at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 })] : []);
+// Every Sven Packmaster is immune to ability damage and ranged damage (wiki); the Slayer quest's 3 minutes.
+export const svenBlocks = (t) => [SLAYER_DESPAWN, MAGIC_IMMUNE, BOW_IMMUNE, t >= 2 && callThePups({ at: 1 / 2, count: 5, every: 1, hpFrac: 0.1 })].filter(Boolean);
 export const demonlordBlocks = (t) => [
   LONG_DESPAWN,
   t >= 1 && hellionShield(),

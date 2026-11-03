@@ -6,6 +6,7 @@ import {
   DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, enemyBlocks,
 } from './data/mechanics.js';
 import { phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines, scheduledPhases } from './bossMechanics.js';
+import { DUNGEON_HIT_MANA } from './data/abilities.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
 export const SIM_MAX_SECONDS = 600;
@@ -82,23 +83,59 @@ function fight(input, opts, skip) {
   const dominusEvery = crimson ? DOMINUS_GAIN_S[Math.min(crimson.count, 4)] : 0;
   const swipeMult = crimson ? DOMINUS_SWIPE_MULT[crimson.tier][Math.min(crimson.count, 4) - 2] : 0;
 
+  // The weapon's right-click ability (input.weapon.attack: 'left' melee only, 'right' casts only, 'both'
+  // casts whenever it's ready and affordable, with melee hits between): its hit, mana cost and cooldown.
+  const attack = input.weapon?.attack || 'left';
+  const spell = attack !== 'left' ? calculate({ ...input, damageType: 'magic', player: { ...player, hitNumber: 1 } }).ability : null;
+  const casting = !!spell;
+  const swinging = !casting || attack === 'both';
+  // As fast as the game allows: once the cooldown is up (at least a tick apart). One that deals damage
+  // over time is recast once the last has run out; its ticks land each second from the cast.
+  const castEvery = casting ? Math.max(1, Math.round(spell.cooldown * TICKS_PER_SECOND), spell.over * TICKS_PER_SECOND) : 0;
+  // Mana: full at the start, 2% of max back at each whole second; in dungeons a melee hit gives 5 + 1%.
+  const maxMana = base.maxMana;
+  let mana = maxMana;
+  let manaSec = 0;
+  let lowestMana = mana;
+  const manaTo = (t) => {
+    const secs = Math.floor(t + 1e-9) - manaSec;
+    if (secs > 0) {
+      mana = Math.min(maxMana, mana + secs * base.manaRegen);
+      manaSec += secs;
+    }
+  };
+  const hitMana = base.inDungeon ? DUNGEON_HIT_MANA.flat + maxMana * DUNGEON_HIT_MANA.pct / 100 : 0;
+  let nextSwing = 0;
+  let nextCast = 0;
+  const dots = []; // ticks of damage over time still to land
+  // When the next cast can go off: its cooldown is up and there's the mana (regen comes each whole second).
+  const castReady = () => {
+    if (mana >= spell.manaCost - 1e-9) return nextCast;
+    const secs = Math.ceil((spell.manaCost - mana) / base.manaRegen - 1e-9);
+    return Math.max(nextCast, (manaSec + secs) * TICKS_PER_SECOND);
+  };
+  // The next tick something is due (never before now).
+  const wake = (tick) => Math.max(tick, Math.min(swinging ? nextSwing : Infinity, casting ? castReady() : Infinity, dots.length ? dots[0] : Infinity));
+
   // Weapons the player swaps between: the main one, and a second Blaze Slayer dagger (input.weapon2).
   const weapons = [input.weapon, input.weapon2].filter((w) => w?.item);
   // The target being hit, when it isn't the boss itself (a demon): its max HP before Mayor Derpy and its HP %.
   let side = null;
   // The single-hit result for a hit's state; most hits share one, so cache them.
   const cache = new Map();
-  const hitResult = (n, stacks, w = 0, toss = false) => {
-    const tenth = n % 10 === 0;
-    const fourth = n % 4 === 0;
-    const third = n % 3 === 0; // Primordial Armor
+  // magic: the weapon's ability instead (a cast or a tick of its damage over time), which counts no hits.
+  const hitResult = (n, stacks, w = 0, toss = false, magic = false) => {
+    const tenth = !magic && n % 10 === 0;
+    const fourth = !magic && n % 4 === 0;
+    const third = !magic && n % 3 === 0; // Primordial Armor
     const pct = side ? Math.round(side.pct * 10) / 10 : maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
-    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}|${toss}`;
+    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}|${toss}|${magic}`;
     let r = cache.get(key);
     if (!r) {
       const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * broodB.hpMult } : {};
       r = calculate({
         ...input,
+        ...(magic ? { damageType: 'magic' } : {}),
         weapon: weapons[w] || input.weapon,
         player: { ...player, hitNumber: n, toss },
         target: { ...input.target, hpPct: pct, ...targetMax },
@@ -119,7 +156,8 @@ function fight(input, opts, skip) {
     return r;
   };
 
-  const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0 } };
+  const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, casts: 0, dotTicks: 0,
+    damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0, ability: 0 } };
   // The player's stats over the fight, as [low, high] by stat: those of every hit and Terminator shot.
   const statRanges = {};
   const trackStats = (totals) => {
@@ -209,7 +247,7 @@ function fight(input, opts, skip) {
       crossed = t;
       if (cap) {
         hitEv.damage -= line - at;
-        out.damage.hits -= line - at;
+        out.damage[hitEv.ability ? 'ability' : 'hits'] -= line - at;
         at = line;
       }
     }
@@ -268,6 +306,7 @@ function fight(input, opts, skip) {
     playerBusy.push([t, shieldUntil]);
   };
   const blocked = []; // [start, end) windows with no hits: laser immunity, glyphs, heads
+  const immune = []; // [start, end) windows the boss takes no damage in (damage over time is lost)
   // The player's own pauses go one after another: a new one starts once any earlier one is over.
   const playerBusy = [];
   // Wipe mechanics as they land: { id, kind (its row), name, land, deadline, clutch }.
@@ -366,6 +405,7 @@ function fight(input, opts, skip) {
     outlaw.special = { end: t + length + o.shield.linger };
     phases.push({ kind: 'reflect', start: t, end: outlaw.special.end, detail: name });
     blocked.push([t, outlaw.special.end]); // the shield reflects damage, so the player doesn't hit
+    immune.push([t, outlaw.special.end]);
   };
   const startSpecial = (t) => {
     const o = outlawB;
@@ -377,6 +417,7 @@ function fight(input, opts, skip) {
       outlaw.special = { end: t + o.skulls.window };
       phases.push({ kind: 'skulls', start: t, end: outlaw.special.end });
       blocked.push([t, t + o.skulls.kill]);
+      immune.push([t, t + o.skulls.kill]);
       playerBusy.push([t, t + o.skulls.kill]);
     } else startShield(t);
   };
@@ -395,6 +436,7 @@ function fight(input, opts, skip) {
     beams: (t, f, b) => {
       phases.push({ kind: 'laser', start: t, end: t + b.immune });
       blocked.push([t, t + b.immune]);
+      immune.push([t, t + b.immune]);
     },
     wipeTimer: (t, f, b) => { timers.find((x) => x.b === b).next = t + b.delay; },
     nukekubiHeads: (t) => { nextHead = t; },
@@ -443,12 +485,24 @@ function fight(input, opts, skip) {
       }
       nextHead += headsB.every;
     }
+    // What happens now: a tick of damage over time lands (it isn't the player's action), a cast goes
+    // off, or a melee hit; with nothing due yet, wait for the next.
+    manaTo(t);
+    const action = dots.length && dots[0] <= tick ? 'dot'
+      : casting && tick >= castReady() ? 'cast'
+        : swinging && tick >= nextSwing ? 'swing' : null;
+    if (!action) {
+      tick = Math.max(tick + 1, wake(tick));
+      n--;
+      continue;
+    }
+    const swing = action === 'swing';
     // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
     // use the dagger whose family takes its attunement (swapping or toggling first if needed).
     const demon = demons ? demons.list[demons.active] : null;
     const need = hellionB ? (demon ? demon.attunes[demon.at] : HELLION_ORDER[attune]) : null;
     let w = 0;
-    if (need) {
+    if (need && swing) {
       const i = weapons.findIndex((x) => DAGGER_FAMILIES[daggerFamily(x.item.id)]?.attunes.includes(need));
       if (i >= 0) {
         w = i;
@@ -461,8 +515,9 @@ function fight(input, opts, skip) {
         held = need;
       }
     }
-    const matched = !need || DAGGER_FAMILIES[daggerFamily(weapons[w]?.item.id)]?.attunes.includes(need);
-    if (hellionB) {
+    // An ability isn't a dagger strike, so the Hellion Shield takes its 99%.
+    const matched = !need || (swing && DAGGER_FAMILIES[daggerFamily(weapons[w]?.item.id)]?.attunes.includes(need));
+    if (hellionB && swing) {
       const att = need ? need[0] + need.slice(1).toLowerCase() : '';
       showHellion(t, `${att} · ${matched ? weapons[w].item.name : 'no matching dagger'}${demon ? ` · ${demon.name}` : ''}`);
     }
@@ -471,6 +526,11 @@ function fight(input, opts, skip) {
     if (pups) {
       pup = pups.find((p) => p.hp > 0 && p.at <= t + 1e-9) || null;
       if (!pup) {
+        if (action === 'dot') { // the boss is protected meanwhile
+          dots.shift();
+          n--;
+          continue;
+        }
         const next = pups.find((p) => p.hp > 0);
         tick = Math.max(tick + 1, Math.ceil(next.at * TICKS_PER_SECOND - 1e-9));
         n--;
@@ -481,58 +541,97 @@ function fight(input, opts, skip) {
     side = add ? { maxHp: add.maxHp / derpy, pct: add.hp / add.maxHp * 100 } : null;
 
     // (The tolerance keeps float sums like 57.85 + 0.2 from leaving a window open forever.)
-    const wait = blocked.find(([s, e]) => t >= s && t < e - 1e-9);
-    if (wait) {
-      tick = Math.max(tick + 1, Math.ceil(wait[1] * TICKS_PER_SECOND - 1e-9));
-      n--;
-      continue;
+    if (action === 'dot') {
+      // Damage over time keeps going while the player is busy, but not while the boss is immune.
+      if (immune.some(([a, b]) => t >= a && t < b - 1e-9)) {
+        dots.shift();
+        n--;
+        continue;
+      }
+    } else {
+      const wait = blocked.find(([a, b]) => t >= a && t < b - 1e-9);
+      if (wait) {
+        tick = Math.max(tick + 1, Math.ceil(wait[1] * TICKS_PER_SECOND - 1e-9));
+        n--;
+        continue;
+      }
     }
+    if (!swing) n--; // hit numbers count melee hits
 
-    // Dominus: a melee hit gains a stack if the last one was long enough ago; at 10 stacks it swipes.
+    let r;
+    let dmg;
+    let crit = false;
+    let strikes = 0;
     let swipeReady = false;
-    if (dominusEvery && tick - lastStackTick >= dominusEvery * TICKS_PER_SECOND) {
-      swipeReady = stacks === DOMINUS_MAX;
-      stacks = Math.min(DOMINUS_MAX, stacks + 1);
-      lastStackTick = tick;
+    let step = ticksPerHit;
+    const bonuses = [];
+    if (swing) {
+      // Dominus: a melee hit gains a stack if the last one was long enough ago; at 10 stacks it swipes.
+      if (dominusEvery && tick - lastStackTick >= dominusEvery * TICKS_PER_SECOND) {
+        swipeReady = stacks === DOMINUS_MAX;
+        stacks = Math.min(DOMINUS_MAX, stacks + 1);
+        lastStackTick = tick;
+      }
+      // Golem pet Toss: every 5th hit, at most once per 5 s.
+      const toss = input.pet?.id === 'GOLEM' && n % 5 === 0 && t - lastToss >= 5;
+      if (toss) lastToss = t;
+      r = hitResult(n, stacks, w, toss);
+      trackStats(r.totals);
+      // The second dagger may swing at its own speed.
+      step = w && !bow ? meleeHitTicks(r.totals.ATTACK_SPEED || 0) : ticksPerHit;
+      bonuses.push(...r.procs);
+      crit = random() * 100 < r.critChance;
+      dmg = crit ? r.crit : r.nonCrit;
+      // Overload: a crit can be a Mega Critical Hit.
+      if (crit && r.megaChance && random() * 100 < r.megaChance) {
+        dmg = r.megaCrit;
+        bonuses.push('Overload');
+      }
+      if (crit && fabled) {
+        dmg = Math.floor(dmg * (1 + random() * FABLED_MAX_BONUS));
+        bonuses.push('Fabled');
+      }
+      // Ferocity: each full 100 is an extra strike, the rest a chance at one more; strikes repeat the hit.
+      let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
+      if (shieldB?.feroDivisor && !shield) fero /= shieldB.feroDivisor;
+      strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
+      out.hits++;
+      if (crit) out.crits++;
+      out.ferocity += strikes;
+      nextSwing = tick + step;
+      if (hitMana) mana = Math.min(maxMana, mana + hitMana);
+    } else {
+      // Magic Damage: no crits, Ferocity, lightning or swipes.
+      r = hitResult(n, 0, 0, false, true);
+      trackStats(r.totals);
+      dmg = r.nonCrit;
+      if (action === 'cast') {
+        mana -= spell.manaCost;
+        lowestMana = Math.min(lowestMana, mana);
+        nextCast = tick + castEvery;
+        for (let k = 1; k < spell.over; k++) dots.push(tick + k * TICKS_PER_SECOND);
+        out.casts++;
+      } else {
+        dots.shift();
+        out.dotTicks++;
+      }
     }
-    // Golem pet Toss: every 5th hit, at most once per 5 s.
-    const toss = input.pet?.id === 'GOLEM' && n % 5 === 0 && t - lastToss >= 5;
-    if (toss) lastToss = t;
-    const r = hitResult(n, stacks, w, toss);
-    trackStats(r.totals);
-    // The second dagger may swing at its own speed.
-    const step = w && !bow ? meleeHitTicks(r.totals.ATTACK_SPEED || 0) : ticksPerHit;
-    const bonuses = [...r.procs];
-    const crit = random() * 100 < r.critChance;
-    let dmg = crit ? r.crit : r.nonCrit;
-    // Overload: a crit can be a Mega Critical Hit.
-    if (crit && r.megaChance && random() * 100 < r.megaChance) {
-      dmg = r.megaCrit;
-      bonuses.push('Overload');
-    }
-    if (crit && fabled) {
-      dmg = Math.floor(dmg * (1 + random() * FABLED_MAX_BONUS));
-      bonuses.push('Fabled');
-    }
-    // Ferocity: each full 100 is an extra strike, the rest a chance at one more; strikes repeat the hit.
-    let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
-    if (shieldB?.feroDivisor && !shield) fero /= shieldB.feroDivisor;
-    const strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
+    // A cast or a tick of its damage over time, for the indicator and results.
+    const mark = swing ? {} : { ability: spell.name, [action]: true };
+    if (casting) mark.mana = mana;
 
-    out.hits++;
-    if (crit) out.crits++;
-    out.ferocity += strikes;
     if (shield) {
       // The shield takes hits, not damage; hits until it breaks still count, even with strikes on their way.
       shield.times.push(t);
       for (let k = 0; k < strikes; k++) shield.times.push(t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S);
       if (shield.times.length >= shield.hits) shield.breakAt = [...shield.times].sort((a, b) => a - b)[shield.hits - 1];
-      record({ t, w, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, sid: shield, tid: 'boss', tidStart: startHp }, 0);
-      tick += ticksPerHit;
+      record({ t, w, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, sid: shield, tid: 'boss', tidStart: startHp, ...mark }, 0);
+      if (swing) nextSwing = tick + ticksPerHit;
+      tick = wake(tick);
       continue;
     }
 
-    const bolt = r.lightningPct && n % 3 === 0 ? Math.floor(dmg * r.lightningPct / 100) : 0;
+    const bolt = swing && r.lightningPct && n % 3 === 0 ? Math.floor(dmg * r.lightningPct / 100) : 0;
     if (bolt) bonuses.push('Lightning');
     // Swipe: the hit × Swipe Strength / its Additive Multiplier, doubled the first time it hits the enemy.
     const swipe = swipeReady ? Math.floor(dmg * swipeMult / r.additiveMult) * (out.swipes ? 1 : 2) : 0;
@@ -543,7 +642,7 @@ function fight(input, opts, skip) {
     const shieldCut = (x) => Math.floor(x * (1 - HELLION_REDUCTION));
     const hitDmg = matched ? dmg : shieldCut(dmg);
     const feroDmg = need ? shieldCut(dmg) : dmg;
-    out.damage.hits += hitDmg;
+    out.damage[swing ? 'hits' : 'ability'] += hitDmg;
     out.damage.ferocity += feroDmg * strikes;
     out.damage.lightning += bolt;
     out.damage.swipes += swipe;
@@ -572,8 +671,8 @@ function fight(input, opts, skip) {
           showSplit(t, other.name);
         }
       }
-      record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name, tid: demon, tidStart: demon.maxHp }, feroPart);
-      tick += step;
+      record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: demon.hp, maxHp: demon.maxHp, target: demon.name, tid: demon, tidStart: demon.maxHp, ...mark }, feroPart);
+      tick = wake(tick);
       continue;
     }
     if (pup) {
@@ -585,8 +684,8 @@ function fight(input, opts, skip) {
           showPups(t, null);
         } else showPups(t, `${killed} of ${pups.length} pups killed`);
       }
-      record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup', tid: pup, tidStart: pup.maxHp }, feroPart);
-      tick += step;
+      record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp: pup.hp, maxHp: pup.maxHp, target: 'Sven Pup', tid: pup, tidStart: pup.maxHp, ...mark }, feroPart);
+      tick = wake(tick);
       continue;
     }
     if (maxHp) {
@@ -600,7 +699,7 @@ function fight(input, opts, skip) {
       attune = (attune + 1) % HELLION_ORDER.length;
     }
     const struck = record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
-      ...(broodOn ? { target: 'Conjoined Brood', tid: 'brood', tidStart: maxHp } : { tid: 'boss', tidStart: startHp }) }, feroPart);
+      ...(broodOn ? { target: 'Conjoined Brood', tid: 'brood', tidStart: maxHp } : { tid: 'boss', tidStart: startHp }), ...mark }, feroPart);
     if (maxHp) {
       bossStrikes.push(...struck.slice(1));
       bossStrikes.sort((a, b) => a.t - b.t);
@@ -618,7 +717,8 @@ function fight(input, opts, skip) {
       hpPct = 100;
       triggers.length = 0;
       phases.push({ kind: 'brood', start: t, end: Infinity });
-      tick += ticksPerHit;
+      if (swing) nextSwing = tick + ticksPerHit;
+      tick = wake(tick);
       continue;
     }
     if (maxHp && hp <= 0) {
@@ -629,7 +729,7 @@ function fight(input, opts, skip) {
       const { f, b } = triggers.shift();
       ON_LINE[b.kind](Math.max(t, gateAt), f, b);
     }
-    tick += step;
+    tick = wake(tick);
   }
 
   // Time order (strikes after later hits), then the running total and each target's HP along it. The
@@ -678,12 +778,18 @@ function fight(input, opts, skip) {
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
   for (const n of blockNotes(blocks, { weapons: weapons.length })) notes.push(`Boss phases: ${n}.`);
+  if (casting) {
+    notes.push(`${spell.name}: ${Math.round(spell.manaCost)} mana a cast, at most every ${castEvery / TICKS_PER_SECOND} s; ${Math.round(maxMana)} max mana, +${Math.round(base.manaRegen)} a second.`);
+    if (spell.over) notes.push(`${spell.name} deals its damage over ${spell.over} s and is recast once it runs out.`);
+  }
   if (!blocks.length && input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {
     mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp,
     endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
     hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics, statRanges,
+    // The ability, if cast: its name, and the mana pool and its lowest point.
+    attack: casting ? attack : 'left', spellName: spell?.name || null, maxMana, lowestMana: casting ? lowestMana : null,
     // The weapons by event w (the main one, then a second dagger), and the Terminator if one was used.
     weaponNames: weapons.map((x) => x.item.name), terminatorName: terminator ? input.terminator?.name || 'Terminator' : null,
     // Every phase this boss can have, whether or not this fight got to it (for the indicator).

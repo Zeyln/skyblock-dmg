@@ -507,8 +507,83 @@ describe('dungeon classes', () => {
     expect(run(melee, { id: 'archer', level: 50 })).toBe(1);
   });
 
-  it('Healer / Mage / Tank add no hit damage', () => {
-    for (const id of ['healer', 'mage', 'tank']) expect(run(melee, { id, level: 50 })).toBe(1);
+  it('Healer / Tank add no hit damage', () => {
+    for (const id of ['healer', 'tank']) expect(run(melee, { id, level: 50 })).toBe(1);
+  });
+
+  it('Mage: melee becomes the Mage Staff beam, (30% + 0.9 × Intelligence / 1000) of the hit, in dungeons', () => {
+    // Mage 50: 250 + 5 × 50 = 500 Intelligence → 30% + 45%.
+    expect(run(melee, { id: 'mage', level: 50 })).toBeCloseTo(0.75);
+    expect(run(melee, { id: 'mage', level: 50 }, 'none')).toBe(1);
+    expect(run(ranged, { id: 'mage', level: 50 })).toBe(1);
+    const r = calculate({ weapon: melee, dungeonClass: { id: 'mage', level: 50 }, dungeonMode: 'catacombs' });
+    expect(r.intelligence).toBe(500);
+    expect(r.abilityDamage).toBe(15);
+  });
+});
+
+describe('abilities (Magic Damage)', () => {
+  const magic = (item, { weapon = {}, ...rest } = {}) => calculate({ ...rest, weapon: { item, ...weapon }, damageType: 'magic' });
+  const aotd = (stats = {}) => sword({ DAMAGE: 225, WEAPON_ABILITY_DAMAGE: 12000, ...stats }, { id: 'ASPECT_OF_THE_DRAGON' });
+  const hype = (stats = {}) => sword({ DAMAGE: 260, INTELLIGENCE: 350, ...stats }, { id: 'HYPERION', dungeon_item: true });
+
+  it('Base × (1 + Intelligence/100 × Scaling) × (1 + Ability Damage/100); no crit', () => {
+    expect(magic(aotd()).nonCrit).toBe(12000);
+    const r = magic(aotd({ INTELLIGENCE: 1000, ABILITY_DAMAGE_PERCENT: 20 }));
+    expect(r.nonCrit).toBe(Math.floor(12000 * 2 * 1.2));
+    expect(r.crit).toBe(r.nonCrit);
+    expect(r.critChance).toBe(0);
+  });
+
+  it('Wither Impact: 10,000 base from the scrolls, 0.3 scaling', () => {
+    expect(magic(hype()).nonCrit).toBe(Math.floor(10000 * (1 + 3.5 * 0.3)));
+    expect(magic(hype(), { weapon: { scrolls: 'none' } }).ability).toBe(null);
+    expect(magic(hype(), { weapon: { scrolls: 'implosion' } }).ability.cooldown).toBe(10);
+  });
+
+  it('Sharpness does nothing; Smite and the Combat skill do; Dragon Rage ignores the Additive Multiplier', () => {
+    const base = magic(hype()).nonCrit;
+    expect(magic(hype(), { weapon: { enchants: { sharpness: 7 } } }).nonCrit).toBe(base);
+    expect(magic(hype(), { weapon: { enchants: { smite: 7 } }, target: { mobs: ['Undead'] } }).nonCrit).toBe(Math.floor(20500 * 1.5));
+    expect(magic(hype(), { combatLevel: 50 }).nonCrit).toBe(Math.floor(20500 * 3));
+    expect(magic(aotd(), { combatLevel: 50 }).nonCrit).toBe(12000);
+  });
+
+  it('Magic immunity and resistance from the enemy; Giant\'s Slam counts as melee', () => {
+    expect(magic(hype(), { target: { enemy: 'Sven Packmaster I' } }).nonCrit).toBe(0);
+    expect(magic(hype(), { target: { enemy: 'Atoned Horror' } }).nonCrit).toBe(0);
+    expect(magic(hype(), { target: { enemy: 'Necron (F7)' } }).nonCrit).toBe(Math.floor(20500 * 0.01));
+    const giants = sword({ DAMAGE: 500, WEAPON_ABILITY_DAMAGE: 100000 }, { id: 'GIANTS_SWORD' });
+    expect(magic(giants, { target: { enemy: 'Sven Packmaster I' } }).nonCrit).toBe(100000);
+  });
+
+  it('dungeon items: the Catacombs boost and stars scale the base ability damage', () => {
+    const r = magic(hype({ INTELLIGENCE: 0 }), { dungeonMode: 'catacombs', catacombsLevel: 50 });
+    expect(r.ability.base).toBeCloseTo(10000 * (1 + catacombsBoost(50) / 100));
+  });
+
+  it('mana: 100 + Intelligence, 2% a second; Ultimate Wise and the Mage cooldown cut', () => {
+    const r = magic(hype(), { weapon: { ultimate: { id: 'ultimate_wise', level: 5 } } });
+    expect(r.maxMana).toBe(450);
+    expect(r.manaRegen).toBeCloseTo(9);
+    expect(r.ability.manaCost).toBe(150);
+    const yeti = sword({ DAMAGE: 150, WEAPON_ABILITY_DAMAGE: 15000 }, { id: 'YETI_SWORD' });
+    expect(magic(yeti, { dungeonClass: { id: 'mage', level: 50 }, dungeonMode: 'catacombs' }).ability.cooldown).toBe(0.5);
+    // Wither Impact's 3-tick limit isn't shortened.
+    expect(magic(hype(), { dungeonClass: { id: 'mage', level: 50 }, dungeonMode: 'catacombs' }).ability.cooldown).toBe(0.15);
+  });
+
+  it('Midas Staff: Greed adds up to 26,000 base at 100M paid', () => {
+    const staff = sword({ DAMAGE: 130, WEAPON_ABILITY_DAMAGE: 6000 }, { id: 'MIDAS_STAFF' });
+    expect(magic(staff).ability.base).toBe(6000);
+    expect(magic(staff, { weapon: { price: 100e6 } }).ability.base).toBe(32000);
+  });
+
+  it('damage over time: the base is spread over its seconds', () => {
+    const fury = sword({ DAMAGE: 100, WEAPON_ABILITY_DAMAGE: 42000 }, { id: 'FIRE_FURY_STAFF' });
+    expect(magic(fury).nonCrit).toBe(4200);
+    const veil = sword({ DAMAGE: 50, WEAPON_ABILITY_DAMAGE: 15000 }, { id: 'FIRE_VEIL_WAND' });
+    expect(magic(veil).nonCrit).toBe(15000);
   });
 });
 

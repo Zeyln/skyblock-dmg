@@ -1,12 +1,17 @@
 // The results of a finished simulation (sim.js simulate()), for the results screen: what the fight
 // came to, counted from its events and phases.
 
-// Hits per weapon: the build's weapons (by event w), then the Terminator's shots at Hitshields, the
-// shortbow's at Web of Lies egg sacs, and hits on Fire Pillars. Each { name, count, unit, note }.
+// Hits per weapon: the build's weapons (by event w), its ability's casts, then the Terminator's shots at
+// Hitshields, the shortbow's at Web of Lies egg sacs, and hits on Fire Pillars. Each { name, count, unit, note }.
 function hitsByWeapon(s) {
-  const hits = s.events.filter((e) => !e.feroOnly);
+  const hits = s.events.filter((e) => !e.feroOnly && !e.ability);
   const names = s.weaponNames?.length ? s.weaponNames : ['No weapon'];
   const rows = names.map((name, w) => ({ name, count: hits.filter((e) => (e.w || 0) === w).length, unit: 'hits' }));
+  const casts = s.events.filter((e) => e.cast).length;
+  if (casts) {
+    const ticks = s.events.filter((e) => e.dot).length;
+    rows.push({ name: s.spellName, count: casts, unit: 'casts', ...(ticks ? { note: `and ${ticks} more seconds of its damage over time` } : {}) });
+  }
   const phases = s.phases || [];
   const shots = phases.filter((p) => p.kind === 'shield' && p.shots).reduce((n, p) => n + p.shots.length, 0);
   if (shots) rows.push({ name: s.terminatorName || 'Terminator', count: shots, unit: 'shots', note: `${shots * 3} explosive arrows at Hitshields` });
@@ -55,5 +60,8 @@ export function summarize(s) {
       .map(([stat, [low, high]]) => ({ stat, low, high })),
     swaps: swaps(s),
     lowestEnemyPct: s.killedAt === null ? lowestEnemyPct : null,
+    // The mana pool's lowest point, when the ability was cast.
+    lowestMana: s.lowestMana ?? null,
+    maxMana: s.maxMana,
   };
 }

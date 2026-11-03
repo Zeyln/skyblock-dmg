@@ -74,6 +74,12 @@ export const MECHANICS = {
     ],
     note: (b) => `Enrage (Mad at ${b.at} s, Enraged ${b.mad} s later for ${b.enraged} s) is tanked, so it costs no time`,
   },
+  // Less (or no) Magic Damage taken: abilities' damage, not the melee hits.
+  bowImmune: { bowImmune: true, note: () => 'immune to bow damage' },
+  magicResist: {
+    magicResist: (b) => b.pct,
+    note: (b) => (b.pct >= 100 ? 'immune to Magic Damage (abilities)' : `${b.pct}% Magic Damage resistance`),
+  },
   // One row per timer, named by the block.
   wipeTimer: {
     wipe: true, lines: (b) => (b.from != null ? [b.from] : []),
@@ -110,6 +116,10 @@ export const blockNotes = (blocks, fight = {}) => defs(blocks).map(([b, m]) => m
 
 // Despawn time in seconds (null: none), and the share of max health healed a second.
 export const despawnSeconds = (blocks) => defs(blocks).map(([b, m]) => m.despawnS?.(b)).find((x) => x != null) ?? null;
+// Whether bow (arrow) damage does nothing.
+export const bowImmune = (blocks) => defs(blocks).some(([, m]) => m.bowImmune);
+// Magic Damage resistance in % (100: immune), 0 when none.
+export const magicResistPct = (blocks) => Math.min(100, defs(blocks).reduce((sum, [b, m]) => sum + (m.magicResist?.(b) || 0), 0));
 export const regenPerSecond = (blocks) => defs(blocks).reduce((sum, [b, m]) => sum + (m.regen?.(b) || 0), 0);
 
 // The nametag status for the phases active at clock: the first row (in the enemy's order) whose tag has one.

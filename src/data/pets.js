@@ -11,6 +11,7 @@ const PET_STAT_KEYS = {
   CRIT_CHANCE: 'CRITICAL_CHANCE',
   BONUS_ATTACK_SPEED: 'ATTACK_SPEED',
   SPEED: 'WALK_SPEED',
+  ABILITY_DAMAGE: 'ABILITY_DAMAGE_PERCENT',
 };
 export const normalizeStat = (k) => PET_STAT_KEYS[k] || k;
 
@@ -72,7 +73,7 @@ export const PET_ITEMS = {
 // ---------- Ability rules ----------
 // re: matched against the lore (colour codes stripped, whitespace collapsed); capture groups
 // return placeholder indices into otherNums. Each rule's apply() turns values into effects.
-// ctx: { target, player, weaponId, bow, inDungeon, extras }
+// ctx: { target, player, weaponId, bow, magic (an ability's damage), inDungeon, extras }
 const R = (pet, name, re, apply) => ({ pet, name, re, apply });
 // For lore with the numbers written out (no {n} placeholders): captures are read as numbers.
 const RAW = (pet, name, re, apply) => ({ ...R(pet, name, re, apply), raw: true });
@@ -125,7 +126,7 @@ export const PET_RULES = [
     ([v], ctx) => (ctx.player.toss ? { multiplier: v } : null)),
   // Not added: Bal's Cannibal (damage to Bal, which isn't a target here).
   R('GIRAFFE', 'Long Neck', new RegExp(`Increases your melee damage by ${N}% if you are more than 3 blocks away`),
-    ([v], ctx) => (!ctx.bow && ctx.target.distance === 'far' ? { additive: v } : null)),
+    ([v], ctx) => (!ctx.bow && !ctx.magic && ctx.target.distance === 'far' ? { additive: v } : null)),
   R('GRIFFIN', 'Sacred Strength', new RegExp(`Gain \\+${N}%\\s*Strength when above 85%\\s*Health`),
     ([v], ctx) => (ctx.player.fullHealth ? { statPct: { STRENGTH: v } } : null)),
   R('GOLEM', 'Last Stand', /While at less than 20% HP[^(]*deal 40% more damage/,

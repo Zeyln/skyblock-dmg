@@ -662,3 +662,78 @@ describe('results screen', () => {
     expect(r.lowestEnemyPct).toBeCloseTo(Math.min(...s.events.map((e) => e.hp)) / 1.5e6 * 100);
   });
 });
+
+describe('abilities in the fight', () => {
+  const hype = (int) => sword({ DAMAGE: 260, STRENGTH: 150, INTELLIGENCE: int }, { id: 'HYPERION', dungeon_item: true });
+  const run = (item, attack, extra = {}, opts = {}) =>
+    simulate(noCrit({ item, attack }, { target: { maxHp: 1e12 }, ...extra }), { mode: 'duration', duration: 10, ...opts });
+
+  it('left click is melee only, as before', () => {
+    const s = run(hype(2000), 'left');
+    expect(s.casts).toBe(0);
+    expect(s.hits).toBe(20);
+  });
+
+  it('right click casts as mana allows: a full pool, then 2% of max a second', () => {
+    // 2,100 mana: 7 casts at once (one per 3 ticks), then +42 a second gives the 8th at 8 s (300 needs 8 whole seconds).
+    const s = run(hype(2000), 'right');
+    expect(s.casts).toBe(8);
+    expect(s.hits).toBe(0);
+    expect(s.events.slice(0, 7).map((e) => e.t)).toEqual([0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9]);
+    expect(s.events[7].t).toBe(8);
+    expect(s.events.every((e) => e.hit === 70000 && !e.crit && !e.ferocity && e.cast)).toBe(true);
+    expect(s.lowestMana).toBeLessThan(300);
+  });
+
+  it('casts wait for the cooldown when mana is plenty', () => {
+    const yeti = sword({ DAMAGE: 150, INTELLIGENCE: 100000, WEAPON_ABILITY_DAMAGE: 15000 }, { id: 'YETI_SWORD' });
+    expect(run(yeti, 'right').casts).toBe(10);
+  });
+
+  it('both: casts and melee hits interleave; melee keeps its crits and Ferocity', () => {
+    const s = run(hype(2000), 'both');
+    expect(s.casts).toBe(8);
+    expect(s.hits).toBe(20);
+    expect(s.events.filter((e) => e.cast)).toHaveLength(8);
+  });
+
+  it('damage over time ticks each second and is recast once it runs out', () => {
+    const fury = sword({ DAMAGE: 100, INTELLIGENCE: 3000, WEAPON_ABILITY_DAMAGE: 42000 }, { id: 'FIRE_FURY_STAFF' });
+    const s = run(fury, 'right', {}, { duration: 25 });
+    expect(s.casts).toBe(2);
+    expect(s.dotTicks).toBe(13);
+    expect(s.events.map((e) => e.t)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22, 23, 24]);
+  });
+
+  it('immune bosses take nothing from abilities', () => {
+    const s = run(hype(2000), 'right', { target: { enemy: 'Sven Packmaster I', maxHp: 2000, boss: true } });
+    expect(s.casts).toBe(8);
+    expect(s.total).toBe(0);
+  });
+
+  it('the Hellion Shield takes 99% off abilities', () => {
+    const s = run(hype(2000), 'right', { target: { enemy: 'Inferno Demonlord II', maxHp: 1e7, boss: true } });
+    expect(s.events[0].hit).toBe(Math.floor(70000 * 0.01));
+  });
+
+  it('in dungeons a melee hit gives back 5 + 1% of max mana', () => {
+    const inD = run(hype(2000), 'both', { dungeonMode: 'catacombs' });
+    const out = run(hype(2000), 'both');
+    expect(inD.casts).toBeGreaterThan(out.casts);
+  });
+});
+
+describe('Sven Packmaster', () => {
+  it('is immune to bow damage', () => {
+    const bow = { id: 'TEST_BOW', name: 'Bow', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 500 } };
+    const s = simulate({ weapon: { item: bow }, target: { enemy: 'Sven Packmaster I', maxHp: 2000, boss: true } }, { mode: 'kill' });
+    expect(s.total).toBe(0);
+    expect(calculate({ weapon: { item: bow }, target: { enemy: 'Sven Packmaster I' } }).crit).toBe(0);
+  });
+
+  it('despawns after the Slayer quest\'s 3 minutes', () => {
+    const sven = simulate(noCrit(sword({ DAMAGE: 1 }), { target: { enemy: 'Sven Packmaster IV', maxHp: 2e6, boss: true } }), { mode: 'kill' });
+    expect(sven.despawned).toBe(true);
+    expect(sven.seconds).toBe(180);
+  });
+});

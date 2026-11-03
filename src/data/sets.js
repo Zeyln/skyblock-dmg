@@ -8,7 +8,7 @@
 //   min: pieces needed for the bonus; full: pieces in a full set
 //   inputs: situational values the user supplies [{ key, label, type: 'number'|'toggle', min, max, def }]
 //   effect(ctx) -> { additive?, multiplier?, stats?, statPct?, pieceStatPct?, post?, text, inactive? }
-//     ctx: { count, tier, bow, inDungeon, target, weaponId, cataLevel, speed, input(key) }
+//     ctx: { count, tier, bow, magic (an ability's damage), inDungeon, target, weaponId, cataLevel, speed, input(key) }
 //   noHitEffect: description for sets that are detected but don't change a single hit.
 
 const KUUDRA_TIERS = ['Basic', 'Hot', 'Burning', 'Fiery', 'Infernal'];
@@ -243,7 +243,7 @@ export const SETS = [
     id: 'sa_cloak', name: 'Shadow Assassin Cloak', bonus: 'Teleport strike', slot: 'equipment',
     match: ids('SHADOW_ASSASSIN_CLOAK'), min: 1, full: 1,
     inputs: [{ key: 'teleported', label: 'Teleported within the last 5s', type: 'toggle', def: false }],
-    effect: ({ input, bow }) => (input('teleported') && !bow
+    effect: ({ input, bow, magic }) => (input('teleported') && !bow && !magic
       ? { additive: 10, text: '+10% damage on the next melee hit after teleporting' }
       : { inactive: true, text: '+10% on the next melee hit after teleporting' }),
   },

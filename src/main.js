@@ -11,6 +11,7 @@ import { createSimGraphic } from './simGraphic.js';
 import { PHASE_LABELS } from './bossMechanics.js';
 import { summarize } from './simResults.js';
 import { mobSprite } from './data/mobSprites.js';
+import { weaponAbility, WITHER_BLADES, WITHER_SCROLLS, greedBase, mageStats, mageCooldownPct } from './data/abilities.js';
 import {
   PET_RARITIES, PET_ITEMS, petLevelRange, petNumbers, effectiveRarity, cleanLore, fillLore, rarityIdx,
 } from './data/pets.js';
@@ -381,6 +382,7 @@ function anvilControls(kind, path) {
     (n ? { value: n, label: `${n} book${n === 1 ? '' : 's'}`, note: statText(Object.fromEntries(Object.entries(perBook).map(([k, v]) => [k, v * (n + offset)]))) } : [n, 'None']));
   const price = PRICE_ITEMS[item.id];
   const greed = price ? greedBonus(item.id, getPath(`${path}.price`)) : 0;
+  const greedSpell = kind === 'weapon' ? weaponAbility({ item })?.greed && weaponAbility({ item }) : null;
   return h('div', { class: 'anvil' },
     selectField('Hot Potato Books', `${path}.hpb`, bookOpts(HOT_POTATO_MAX, 0), { num: true, rerender: true }),
     hpb >= HOT_POTATO_MAX
@@ -393,6 +395,10 @@ function anvilControls(kind, path) {
       h('input', { type: 'number', min: 0, step: 100000, value: getPath(`${path}.price`) ?? '', placeholder: '0',
         'data-path': `${path}.price`, 'data-num': '1', 'data-rerender': '1' }),
       h('span', { class: 'muted' }, `Greed: +${greed} Damage, +${greed} Strength`)) : '',
+    greedSpell ? h('label', { class: 'field' }, `Bought for (coins, max ${fmt(greedSpell.greed.cap)})`,
+      h('input', { type: 'number', min: 0, step: 100000, value: getPath(`${path}.price`) ?? '', placeholder: '0',
+        'data-path': `${path}.price`, 'data-num': '1', 'data-rerender': '1' }),
+      h('span', { class: 'muted' }, `Greed: ${fmt(greedBase(greedSpell, getPath(`${path}.price`)))} base ability damage`)) : '',
   );
 }
 
@@ -588,6 +594,13 @@ function fillAllGems(quality) {
 }
 
 // ---------- form sections ----------
+// The simulation's attack with a weapon that has a damage ability.
+const ATTACK_MODES = [
+  { value: 'left', label: 'Left click', note: 'melee hits' },
+  { value: 'right', label: 'Right click', note: 'ability casts' },
+  { value: 'both', label: 'Both', note: 'casts when ready, melee between' },
+];
+
 function weaponSection() {
   const weapon = byId.get(state.weapon.id);
   const bow = isBow(weapon);
@@ -616,6 +629,12 @@ function weaponSection() {
   }[ult?.effect];
 
   const ability = WEAPON_ABILITIES[weapon?.id];
+  // Right-click damage ability (data/abilities.js): Necron's Blade variants take scrolls; the simulation
+  // swings, casts, or both.
+  const witherBlade = !!weapon && WITHER_BLADES.includes(weapon.id.replace(/^STARRED_/, ''));
+  const spell = weaponAbility({ item: weapon, scrolls: state.weapon.scrolls });
+  const spellText = spell && [`${fmt(spell.mana)} mana`, spell.cooldown ? `${spell.cooldown} s cooldown` : 'no cooldown',
+    spell.over ? `damage over ${spell.over} s` : ''].filter(Boolean).join(', ');
   // Blaze Slayer daggers come in pairs: the simulation swaps to a dagger of the other family
   // (same upgrades as this one) when the Inferno Demonlord's shield needs it.
   const family = daggerFamily(weapon?.id);
@@ -657,6 +676,14 @@ function weaponSection() {
     ability ? h('div', { class: 'chips' }, h('label', {},
       h('input', { type: 'checkbox', checked: state.weapon.abilityOn !== false, 'data-path': 'weapon.abilityOn' }),
       `${ability.name} active (${statText(ability.stats)} vs ${ability.families.join('/')})`)) : '',
+    witherBlade || spell ? h('div', { class: 'grid wide' },
+      witherBlade ? actionSelect('Scrolls', WITHER_SCROLLS, state.weapon.scrolls || 'impact',
+        (v) => { state.weapon.scrolls = v; rerenderForm(); }, { searchable: false, ariaLabel: 'Scrolls' }) : '',
+      spell ? h('div', { class: 'field', title: 'What the simulation does with this weapon' },
+        h('span', { class: 'field-label' }, 'Attack'),
+        actionSelect(null, ATTACK_MODES, state.weapon.attack || 'left', (v) => { state.weapon.attack = v; update(); },
+          { searchable: false, ariaLabel: 'Attack' })) : '') : '',
+    spell ? h('p', { class: 'weapon-bonus' }, `Ability: ${spell.name} (${spellText})`) : '',
     secondOpts.length ? h('div', { class: 'grid wide' },
       h('div', { class: 'field', title: 'Swapped to for the other attunements; uses this dagger’s upgrades' },
         h('span', { class: 'field-label' }, 'Second dagger'),
@@ -1099,7 +1126,11 @@ function classControls() {
   const cls = DUNGEON_CLASSES.find((c) => c.id === state.dungeonClass.id);
   const bow = isBow(byId.get(state.weapon.id));
   const pct = cls ? classDamageBonus(cls.id, state.dungeonClass.level, bow, state.dungeonClass.solo) : 0;
+  const lvl = Math.max(0, Math.min(CLASS_MAX_LEVEL, Math.floor(state.dungeonClass.level || 0)));
+  const mage = cls?.id === 'mage' && mageStats(lvl);
   const effect = !cls ? ''
+    : mage ? `Mage: +${mage.INTELLIGENCE} Intelligence, +${mage.ABILITY_DAMAGE_PERCENT} Ability Damage, −${mageCooldownPct(lvl)}% ability cooldowns`
+      + (bow ? '' : '; melee hits become the Mage Staff beam, (30% + 0.9 × Intelligence / 1000) of the hit')
     : pct ? `${cls.name}: +${fmt(pct, 2)}% ${bow ? 'arrow' : 'melee'} damage (multiplicative)`
       : `${cls.name} has no ${bow ? 'bow' : 'melee'} damage passive`
         + (cls.melee || cls.bow ? ` — its bonus is for ${cls.melee ? 'melee' : 'bows'}` : '');
@@ -1311,7 +1342,10 @@ let lastResult = null; // the latest single-hit result (the set panel reads the 
 function update() {
   saveState();
   if (!items) return;
-  const r = calculate(buildInput());
+  const input = buildInput();
+  const r = calculate(input);
+  // The weapon's ability (Magic Damage), when it has one.
+  r.spell = weaponAbility(input.weapon) ? calculate({ ...input, damageType: 'magic' }) : null;
   lastResult = r;
   if (lastBow !== null && lastBow !== r.bow) { lastBow = r.bow; rerenderForm(); return; }
   lastBow = r.bow;
@@ -1358,12 +1392,14 @@ function renderResults(r) {
   );
 
   const card = (title, ...body) => h('section', { class: 'card glass' }, h('h2', {}, title), ...body);
+  const notes = [...new Set([...r.notes, ...(r.spell?.notes || [])])];
   const detail = (key, title, summary, body, open = false) => sub(`res-${key}`, title, summary, body, open);
 
   renderHero(r);
 
   document.getElementById('results').replaceChildren(
     card('How it adds up', chain),
+    r.spell?.ability ? card(`${r.spell.ability.name} (right click)`, abilityChain(r.spell)) : '',
     card('Your stats',
       h('div', { class: 'stat-tiles' },
         [['Damage', r.damage], ['Strength', r.strength], ['Crit Dmg', r.critDamage], ['Crit Chance', r.critChance]]
@@ -1378,9 +1414,29 @@ function renderResults(r) {
         r.defense ? ` × defense 100/(100 + ${fmt(r.defense)})` : '', h('br'),
         `= ${fmt(r.nonCrit)} non-crit`, h('br'),
         `× crit (1 + ${fmt(r.critDamage, 1)}/100) = ${fmt(r.crit)}`))),
-    r.notes.length ? card('Notes', h('ul', { class: 'notes' }, r.notes.map((n) => h('li', {}, n)))) : '',
+    notes.length ? card('Notes', h('ul', { class: 'notes' }, notes.map((n) => h('li', {}, n)))) : '',
   );
 
+}
+
+// An ability's Magic Damage, step by step (calc.js, damageType 'magic').
+function abilityChain(m) {
+  const a = m.ability;
+  const step = (k, note, v, cls2 = '') => h('div', { class: `chain-row ${cls2}` },
+    h('div', { class: 'k' }, k, note ? h('small', {}, note) : ''), h('div', { class: 'v' }, v));
+  const over = a.over ? (a.perTick === a.base ? 'a second' : `${fmt(a.base)} over ${a.over} s, a second`) : '';
+  return h('div', { class: 'chain' },
+    step('Base ability damage', over || 'with stars and the Catacombs boost in dungeons', fmt(a.perTick, 1)),
+    step('Intelligence', `1 + ${fmt(m.intelligence, 1)} / 100 × ${a.scaling} scaling`, `×${fmt(a.intMult, 3)}`),
+    step('Ability Damage', `1 + ${fmt(m.abilityDamage, 1)}%`, `×${fmt(a.adMult, 3)}`),
+    step('Additive bonuses', a.noAdditive ? 'this ability ignores them' : `${m.additive.length} source${m.additive.length === 1 ? '' : 's'}`, `×${fmt(a.additiveMult, 3)}`),
+    step('Multiplicative bonuses', `${m.multiplicative.length} source${m.multiplicative.length === 1 ? '' : 's'}`, `×${fmt(m.multMult, 3)}`),
+    a.resist ? step('Magic resistance', a.resist >= 100 ? 'immune' : `${a.resist}%`, `×${fmt(a.resistMult, 3)}`) : '',
+    m.defense ? step('Target defense', `100 / (100 + ${fmt(m.defense)})`, `×${fmt(m.defenseMult, 3)}`) : '',
+    step(a.over ? 'Damage a second' : 'Damage a cast', 'Magic Damage never crits', fmt(a.hit), 'total'),
+    step('Mana', `${fmt(m.maxMana)} max, +${fmt(m.manaRegen, 1)} a second${a.wisePct ? `, Ultimate Wise −${a.wisePct}%` : ''}`, `${fmt(a.manaCost, 1)} a cast`),
+    step('Cooldown', a.cooldownPct ? `Mage −${a.cooldownPct}%` : '', a.cooldown ? `${fmt(a.cooldown, 2)} s` : 'none'),
+  );
 }
 
 // Final damage panel in the top-right corner: always visible while editing anywhere on the page.
@@ -1393,6 +1449,9 @@ function renderHero(r) {
     h('div', { class: 'hero-row' },
       h('div', { class: 'hero-stat' }, h('span', { class: 'hero-lbl' }, 'Non-crit'), num('nonCrit', '')),
       h('div', { class: 'hero-stat' }, h('span', { class: 'hero-lbl' }, `Average · ${fmt(r.critChance, 1)}% crit`), num('expected', 'avg'))),
+    r.spell?.ability && (state.weapon.attack || 'left') !== 'left' ? h('div', { class: 'hero-stat' },
+      h('span', { class: 'hero-lbl' }, `${r.spell.ability.name} · ${r.spell.ability.over ? 'a second' : 'a cast'}`),
+      h('div', { class: 'hero-num' }, fmt(r.spell.ability.hit))) : '',
     h('button', { type: 'button', class: 'primary sim-btn', onclick: startSimulation },
       h('span', { class: 'play', 'aria-hidden': 'true' }), 'Simulate'),
   );
@@ -1549,6 +1608,7 @@ function renderSim(body, startDelay = 0) {
   };
   const bonusNames = [...new Set(events.flatMap((e) => e.bonuses))];
   const procs = {
+    ...(s.spellName ? { cast: proc(`${s.spellName} cast`) } : {}),
     hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
   };
   // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
@@ -1569,6 +1629,8 @@ function renderSim(body, startDelay = 0) {
   const time = readout(s.mode === 'kill' ? 'Time' : `Time (of ${fmt(s.seconds)} s)`);
   const dmg = readout('Damage');
   const dps = readout('Damage / s');
+  const mana = readout('Mana');
+  if (s.spellName) mana.v.textContent = fmt(s.maxMana);
   // The chosen enemy's name (the health bar says the rest), or whatever is being hit instead (a demon, a pup, the Brood).
   const enemyName = state.target.enemy || 'Enemy';
   // The middle: damage numbers off a target, and the damage graph (simGraphic.js).
@@ -1583,7 +1645,7 @@ function renderSim(body, startDelay = 0) {
         h('ul', { class: 'sim-procs', 'aria-label': 'Actions' }, Object.values(procs).map((p) => p.row)),
         phaseRows.length ? h('ul', { class: 'sim-procs', 'aria-label': 'Boss phases' }, phaseRows.map((p) => p.row)) : ''),
       h('div', { class: 'sim-stage' }, s.error ? h('p', { class: 'hint' }, s.error) : graphic.el)),
-    h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, hpRead.el));
+    h('div', { class: 'stat-tiles sim-status' }, time.el, dmg.el, dps.el, s.spellName ? mana.el : '', hpRead.el));
   if (s.error) return;
 
   // Playback: advance the fight clock by real time × speed and replay every event it passes.
@@ -1623,7 +1685,9 @@ function renderSim(body, startDelay = 0) {
       // Average so far, as of this hit (blank for the first second, when it would swing wildly).
       dps.v.textContent = e.t >= 1 ? fmt(total / e.t) : '—';
       // Ferocity strikes arrive as their own event a moment after the hit.
-      if (!e.feroOnly) procs.hit.fire();
+      if (e.ability) procs.cast.fire();
+      else if (!e.feroOnly) procs.hit.fire();
+      if (e.mana != null) mana.v.textContent = fmt(e.mana);
       if (e.ferocity) procs.ferocity.fire();
       if (e.swipe) procs.swipe.fire();
       if (e.bonuses.length) procs.bonus.fire(e.bonuses);
@@ -1685,6 +1749,7 @@ function renderSimResults(s, back) {
         figure('Average damage / s', fmt(r.dps)),
         figure('Highest hit', r.highestHit === null ? '—' : fmt(r.highestHit)),
         figure('Lowest hit', r.lowestHit === null ? '—' : fmt(r.lowestHit)),
+        r.lowestMana !== null ? figure('Lowest mana', `${fmt(r.lowestMana)} of ${fmt(r.maxMana)}`) : '',
         r.lowestEnemyPct !== null ? figure('Lowest enemy health', `${fmt(r.lowestEnemyPct, 1)}%`) : ''),
       h('button', { type: 'button', class: 'ghost', onclick: back }, 'Back to simulation')),
     h('div', { class: 'sim-report-cols' },

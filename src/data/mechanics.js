@@ -1,6 +1,6 @@
 import {
   voidgloomBlocks, revenantBlocks, ATONED_BLOCKS, svenBlocks, demonlordBlocks, broodfatherBlocks,
-  CONJOINED_BROOD_BLOCKS, OUTLAW_BLOCKS,
+  CONJOINED_BROOD_BLOCKS, OUTLAW_BLOCKS, magicResist,
 } from './bosses.js';
 
 export * from './bosses.js';
@@ -124,7 +124,8 @@ export const ENEMIES = [
   floorBoss('Maxor (F7)', ['Wither', 'Arcane'], 100000000),
   floorBoss('Storm (F7)', ['Wither', 'Arcane'], 400000000),
   floorBoss('Goldor (F7)', ['Wither', 'Arcane'], 750000000),
-  floorBoss('Necron (F7)', ['Arcane', 'Wither'], 1000000000),
+  // Necron: 99% magic resistance (wiki, Damage Calculation › Magic Resistance, marked unconfirmed).
+  floorBoss('Necron (F7)', ['Arcane', 'Wither'], 1000000000, { blocks: [magicResist(99)] }),
 
   masterBoss('Bonzo (M1)', ['Humanoid', 'Undead', 'Arcane'], 200000000),
   masterBoss('Scarf (M2)', ['Humanoid', 'Arcane'], 375000000),
@@ -134,7 +135,7 @@ export const ENEMIES = [
   masterBoss('Maxor (M7)', ['Wither', 'Arcane'], 800000000, { defense: 1000 }),
   masterBoss('Storm (M7)', ['Wither', 'Arcane'], 1000000000, { defense: 1800 }),
   masterBoss('Goldor (M7)', ['Wither', 'Arcane'], 1200000000, { defense: 1800 }),
-  masterBoss('Necron (M7)', ['Arcane', 'Wither'], 1400000000, { defense: 2100 }),
+  masterBoss('Necron (M7)', ['Arcane', 'Wither'], 1400000000, { defense: 2100, blocks: [magicResist(99)] }),
   // Master Mode Floor VII only. HP/defense from the dragon stats table; mob types not listed.
   masterBoss('Wither Dragon (M7, any color)', [], 1000000000, { defense: 2500 }),
 
@@ -150,7 +151,8 @@ export const ENEMIES = [
   dungeonMob('Dungeon mobs', 'Skeleton Lord', ['Skeletal'], '2,000,000 – 120,000,000'),
   dungeonMob('Dungeon mobs', 'Super Archer', ['Skeletal'], '240,000 – 200,000,000'),
   dungeonMob('Dungeon mobs', 'Skeletor', ['Skeletal', 'Construct'], '250,000 – 10,200,000'),
-  dungeonMob('Dungeon mobs', 'Withermancer', ['Wither', 'Skeletal', 'Arcane'], '180,000 – 150,000,000'),
+  // Magic-type dungeon mobs: 90% magic resistance (wiki, Damage Calculation › Magic Resistance, unconfirmed).
+  dungeonMob('Dungeon mobs', 'Withermancer', ['Wither', 'Skeletal', 'Arcane'], '180,000 – 150,000,000', { blocks: [magicResist(90)] }),
   dungeonMob('Dungeon mobs', 'Cellar Spider', ['Arthropod', 'Subterranean'], '17,000 – 9,500,000'),
   dungeonMob('Dungeon mobs', 'Fel', ['Arcane'], '450,000 – 160,000,000'),
   dungeonMob('Dungeon mobs', 'Mimic', ['Arcane', 'Construct'], '1,500,000 – 180,000,000'),
