@@ -779,3 +779,17 @@ describe('waiting on mana', () => {
     expect(summarize(s).manaWait).toBe(null);
   });
 });
+
+describe('Fire Aspect', () => {
+  it('burns for % of the igniting hit each second, raised by a stronger hit', () => {
+    // 100 a hit, the first 200 (First Strike IV): the burn keeps the stronger 200, 9% = 18 a second.
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }), enchants: { fire_aspect: 3, first_strike: 4 } }), { duration: 3 });
+    expect(s.hits).toBe(6);
+    expect(s.fireTicks).toBe(2); // at 1 s and 2 s
+    expect(s.damage.fire).toBe(2 * 18);
+    expect(s.total).toBe(200 + 5 * 100 + 2 * 18);
+    expect(summarize(s).highestHit).toBe(200); // burn ticks aren't hits
+    // No effect on a single hit.
+    expect(calculate(noCrit({ item: sword({ DAMAGE: 95 }), enchants: { fire_aspect: 3 } })).nonCrit).toBe(100);
+  });
+});

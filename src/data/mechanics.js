@@ -415,6 +415,10 @@ export const ENCHANTS = [
   // Lightning every 3rd hit for % of that hit's damage: no single-hit effect, used by the simulation (sim.js).
   { id: 'thunderlord', name: 'Thunderlord', on: MELEE, sim: 'lightning', values: [8, 16, 24, 32, 40, 50, 60] },
   { id: 'thunderbolt', name: 'Thunderbolt', on: MELEE, sim: 'lightning', values: [4, 8, 12, 16, 20, 25, 30] },
+  // Fire Aspect: the hit that ignites the target sets a fire DoT of % of that hit's damage each second
+  // for `seconds`; later hits refresh it and raise it if stronger (wiki; forum testing, Feb 2022: the
+  // igniting hit's full damage, Soul Eater included). No single-hit effect, used by the simulation.
+  { id: 'fire_aspect', name: 'Fire Aspect', on: MELEE, sim: 'fire', values: [3, 6, 9], seconds: [3, 4, 4] },
 ];
 
 // Pairs that can't be on the same weapon (applying one replaces the other in-game).
@@ -457,6 +461,35 @@ export const ULTIMATE_ENCHANTS = [
 export function ultimatesFor(item) {
   return ULTIMATE_ENCHANTS.filter((u) => enchantFits(u, item));
 }
+
+// ---------- Armor enchantments ----------
+// Thorns: a 50% chance to send 3–12% of the damage taken back at the attacker (wiki). It needs damage
+// taken, which isn't simulated yet.
+export const ARMOR_ENCHANTS = [
+  { id: 'thorns', name: 'Thorns', values: [3, 6, 9, 12], note: 'Reflects damage you take — no effect until damage taken is simulated' },
+];
+// Armor ultimates, one per piece (wiki, Ultimate Enchantments). effect: 'legion' (% all combat stats per
+// player nearby), 'wisdom' (Intelligence per 5 exp levels, capped), 'habanero' (additive % with slayer
+// weapons against slayer bosses), or none. minLevel: the lowest level that exists.
+export const ARMOR_ULTIMATES = [
+  { id: 'legion', name: 'Legion', values: [0.07, 0.14, 0.21, 0.28, 0.35], effect: 'legion', max: 20 },
+  { id: 'wisdom', name: 'Wisdom', values: [1, 2, 3, 4, 5], caps: [20, 40, 60, 80, 100], effect: 'wisdom' },
+  { id: 'habanero_tactics', name: 'Habanero Tactics', minLevel: 4, values: [0, 0, 0, 20, 25], effect: 'habanero' },
+  { id: 'last_stand', name: 'Last Stand', values: [5, 10, 15, 20, 25], note: 'Defense below 40% health — no damage effect' },
+  { id: 'refrigerate', name: 'Refrigerate', values: [3, 3.75, 4.5, 5.25, 6], note: 'Defense from mana used — no damage effect' },
+  { id: 'bank', name: 'Bank', values: [10, 20, 30, 40, 50], note: 'Coins on death — no damage effect' },
+  { id: 'no_pain_no_gain', name: 'No Pain No Gain', values: [20, 40, 60, 80, 100], note: 'Experience when hit — no damage effect' },
+  { id: 'bobbin_time', name: "Bobbin' Time", minLevel: 3, values: [0, 0, 0.6, 0.8, 1], note: 'Fishing stats — no damage effect' },
+  { id: 'sunset', name: 'Sunset', values: [1, 2, 3, 4, 5], note: 'Farming — no damage effect' },
+];
+// Habanero Tactics' slayer weapons: those whose lore grants Combat Wisdom against the slayer's mobs (NEU
+// item lore), plus Revenant Falchion and Recluse Fang; not the Voidwalker Katana (wiki). Since 2026-09-30
+// it only applies against slayer bosses, not minibosses.
+export const HABANERO_WEAPONS = [
+  'REVENANT_SWORD', 'REAPER_SWORD', 'AXE_OF_THE_SHREDDED', 'RECLUSE_FANG', 'TARANTULA_FANG', 'SCORPION_FOIL', 'STING',
+  'SHAMAN_SWORD', 'POOCH_SWORD', 'VOIDEDGE_KATANA', 'VORPAL_KATANA', 'ATOMSPLIT_KATANA',
+  'FIREDUST_DAGGER', 'MAWDUST_DAGGER', 'BURSTFIRE_DAGGER', 'BURSTMAW_DAGGER', 'HEARTFIRE_DAGGER', 'HEARTMAW_DAGGER',
+];
 
 // ---------- Weapon bonuses vs specific enemies (multiplicative) ----------
 // From the wiki's Damage Calculation tables. Rules match a mob type (mobs) or a creature

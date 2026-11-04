@@ -944,3 +944,40 @@ describe('mana', () => {
     expect(r.additiveMult).toBe(1);
   });
 });
+
+describe('armor enchantments', () => {
+  const sw = (id = 'TEST_SWORD') => ({ item: { id, name: 'Sword', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95, STRENGTH: 100 } } });
+  const helm = (extra = {}) => ({ item: { id: 'X_HELMET', name: 'Helm', category: 'HELMET', tier: 'LEGENDARY', stats: {} }, ...extra });
+
+  it('Legion: % of all combat stats per player nearby, per piece, up to 20 players', () => {
+    const legion = { ultimate: { id: 'legion', level: 5 } };
+    const r = (n, pieces = 1) => calculate({ weapon: sw(), armor: Array.from({ length: pieces }, () => helm(legion)), player: { nearbyPlayers: n } });
+    expect(r(0).strength).toBeCloseTo(100);
+    expect(r(4).strength).toBeCloseTo(100 * 1.014);
+    expect(r(4, 2).strength).toBeCloseTo(100 * 1.028);
+    expect(r(50).strength).toBeCloseTo(100 * 1.07); // capped at 20 players
+  });
+
+  it('Wisdom: Intelligence per 5 experience levels, capped', () => {
+    const r = (levels, level = 5) => calculate({ armor: [helm({ ultimate: { id: 'wisdom', level } })], player: { expLevels: levels } }).intelligence;
+    expect(r(0)).toBe(0);
+    expect(r(49)).toBe(5 * 9);
+    expect(r(1000)).toBe(100);
+    expect(r(1000, 1)).toBe(20);
+  });
+
+  it('Habanero Tactics: additive with slayer weapons against slayer bosses only', () => {
+    const hab = { ultimate: { id: 'habanero_tactics', level: 5 } };
+    const vs = (enemy) => ({ enemy, mobs: ['Animal'], families: ['Wolf'], boss: true });
+    expect(calculate({ weapon: sw('POOCH_SWORD'), armor: [helm(hab), helm(hab)], target: vs('Sven Packmaster IV') }).additiveMult).toBeCloseTo(1.5);
+    expect(calculate({ weapon: sw('TEST_SWORD'), armor: [helm(hab)], target: vs('Sven Packmaster IV') }).additiveMult).toBe(1);
+    expect(calculate({ weapon: sw('POOCH_SWORD'), armor: [helm(hab)], target: vs('Wolf') }).additiveMult).toBe(1);
+  });
+
+  it('Thorns and damage-free ultimates change nothing, with a note for Thorns', () => {
+    const plain = calculate({ weapon: sw(), armor: [helm()] });
+    const r = calculate({ weapon: sw(), armor: [helm({ enchants: { thorns: 3 }, ultimate: { id: 'last_stand', level: 5 } })] });
+    expect(r.nonCrit).toBe(plain.nonCrit);
+    expect(r.notes.some((n) => n.startsWith('Thorns'))).toBe(true);
+  });
+});

@@ -212,7 +212,8 @@ export function createSimGraphic(s, { labels, name, boss }) {
     // One replayed event: its numbers and the line.
     hit(e) {
       show(e.target || name);
-      if (!e.feroOnly && e.damage - (e.swipe || 0) > 0) {
+      if (e.fire) pop(fmt(e.fire), 'fire');
+      else if (!e.feroOnly && e.damage - (e.swipe || 0) > 0) {
         const lightning = e.bonuses?.includes('Lightning') ? Math.max(0, e.damage - e.hit - (e.swipe || 0)) : 0;
         pop(fmt(e.hit), 'hit', e.crit);
         if (lightning) pop(fmt(lightning), 'lightning');

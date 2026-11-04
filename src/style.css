@@ -795,6 +795,7 @@ button.primary:hover { color: var(--on-accent); }
 .sim-pop.ferocity { color: var(--mc-c); }
 .sim-pop.lightning { color: var(--mc-e); }
 .sim-pop.swipe { color: var(--mc-6); }
+.sim-pop.fire { color: var(--mc-6); font-style: italic; }
 @keyframes sim-pop { 0% { opacity: 0; translate: 0 6px; } 15% { opacity: 1; translate: 0 0; } 100% { opacity: 0; translate: 0 -34px; } }
 @media (prefers-reduced-motion: reduce) { .sim-pop { animation: sim-pop-still .9s steps(1) forwards; } @keyframes sim-pop-still { to { opacity: 0; } } }
 

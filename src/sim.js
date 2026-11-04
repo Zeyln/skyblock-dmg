@@ -112,6 +112,10 @@ function fight(input, opts, skip) {
   let nextSwing = 0;
   let nextCast = 0;
   const dots = []; // ticks of damage over time still to land
+  // Fire Aspect's burn on the boss: { dmg, until, next } (ticks). Each second it deals pct% of dmg, the
+  // strongest hit since it was lit; a melee hit lights or refreshes it.
+  const fireFx = !bow ? base.fire : null;
+  let fire = null;
   // A cost that climbs with each cast (Jerry-chine Gun) until manaReset passes without one.
   let streak = 0;
   let lastCast = -Infinity;
@@ -129,7 +133,7 @@ function fight(input, opts, skip) {
   };
   // The next tick something is due (never before now).
   const wake = (tick) => Math.max(tick, Math.min(swinging ? nextSwing : Infinity, casting ? castReady() : Infinity,
-    casting && nextCast > tick ? nextCast : Infinity, dots.length ? dots[0] : Infinity));
+    casting && nextCast > tick ? nextCast : Infinity, dots.length ? dots[0] : Infinity, fire ? fire.next : Infinity));
 
   // Weapons the player swaps between: the main one, and a second Blaze Slayer dagger (input.weapon2).
   const weapons = [input.weapon, input.weapon2].filter((w) => w?.item);
@@ -170,8 +174,8 @@ function fight(input, opts, skip) {
     return r;
   };
 
-  const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, casts: 0, dotTicks: 0,
-    damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0, ability: 0 } };
+  const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, casts: 0, dotTicks: 0, fireTicks: 0,
+    damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0, ability: 0, fire: 0 } };
   // The player's stats over the fight, as [low, high] by stat: those of every hit and Terminator shot.
   const statRanges = {};
   const trackStats = (totals) => {
@@ -511,12 +515,25 @@ function fight(input, opts, skip) {
       }
     }
     const action = dots.length && dots[0] <= tick ? 'dot'
+      : fire && fire.next <= tick ? 'fire'
       : casting && tick >= castReady() ? 'cast'
         : swinging && tick >= nextSwing ? 'swing' : null;
     if (!action) {
       tick = Math.max(tick + 1, wake(tick));
       n--;
       continue;
+    }
+    // A Fire Aspect tick: the burn moves on to its next second (or runs out). None lands while the boss
+    // can't be hurt by it: behind a Hitshield, split into demons, or with pups to kill first.
+    let burn = 0;
+    if (action === 'fire') {
+      burn = fire.dmg;
+      fire.next += TICKS_PER_SECOND;
+      if (fire.next > fire.until) fire = null;
+      if (shield || demons || pups?.some((p) => p.hp > 0)) {
+        n--;
+        continue;
+      }
     }
     const swing = action === 'swing';
     // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
@@ -563,10 +580,10 @@ function fight(input, opts, skip) {
     side = add ? { maxHp: add.maxHp / derpy, pct: add.hp / add.maxHp * 100 } : null;
 
     // (The tolerance keeps float sums like 57.85 + 0.2 from leaving a window open forever.)
-    if (action === 'dot') {
+    if (action === 'dot' || action === 'fire') {
       // Damage over time keeps going while the player is busy, but not while the boss is immune.
       if (immune.some(([a, b]) => t >= a && t < b - 1e-9)) {
-        dots.shift();
+        if (action === 'dot') dots.shift();
         n--;
         continue;
       }
@@ -622,6 +639,10 @@ function fight(input, opts, skip) {
       out.ferocity += strikes;
       nextSwing = tick + step;
       if (hitMana) mana = Math.min(maxMana, mana + hitMana);
+    } else if (action === 'fire') {
+      r = base;
+      dmg = Math.floor(burn * fireFx.pct / 100);
+      out.fireTicks++;
     } else {
       // Magic Damage: no crits, Ferocity, lightning or swipes.
       r = hitResult(n, 0, 0, false, true);
@@ -641,7 +662,7 @@ function fight(input, opts, skip) {
       }
     }
     // A cast or a tick of its damage over time, for the indicator and results.
-    const mark = swing ? {} : { ability: spell.name, [action]: true };
+    const mark = swing ? {} : action === 'fire' ? { fire: dmg } : { ability: spell.name, [action]: true };
     if (casting) mark.mana = mana;
 
     if (shield) {
@@ -664,9 +685,9 @@ function fight(input, opts, skip) {
     // Hellion Shield: an unmatched hit and every Ferocity strike lose 99%; enchant damage
     // (lightning, swipes) gets through in full.
     const shieldCut = (x) => Math.floor(x * (1 - HELLION_REDUCTION));
-    const hitDmg = matched ? dmg : shieldCut(dmg);
+    const hitDmg = matched || action === 'fire' ? dmg : shieldCut(dmg); // the burn is enchant damage too
     const feroDmg = need ? shieldCut(dmg) : dmg;
-    out.damage[swing ? 'hits' : 'ability'] += hitDmg;
+    out.damage[swing ? 'hits' : action === 'fire' ? 'fire' : 'ability'] += hitDmg;
     out.damage.ferocity += feroDmg * strikes;
     out.damage.lightning += bolt;
     out.damage.swipes += swipe;
@@ -718,11 +739,17 @@ function fight(input, opts, skip) {
       regenAt = t;
       hp -= dealt; // below 0 is fine until the strikes are settled
     }
+    // A melee hit on the boss lights Fire Aspect's burn, or refreshes it (keeping the stronger hit).
+    if (swing && fireFx && hitDmg > 0) {
+      const until = tick + fireFx.seconds * TICKS_PER_SECOND;
+      if (fire) Object.assign(fire, { dmg: Math.max(fire.dmg, hitDmg), until });
+      else fire = { dmg: hitDmg, until, next: tick + TICKS_PER_SECOND };
+    }
     if (need && matched && ++attuneHits >= HELLION_SWITCH_HITS) {
       attuneHits = 0;
       attune = (attune + 1) % HELLION_ORDER.length;
     }
-    const struck = record({ t, w, hit: hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
+    const struck = record({ t, w, hit: action === 'fire' ? 0 : hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
       ...(broodOn ? { target: 'Conjoined Brood', tid: 'brood', tidStart: maxHp } : { tid: 'boss', tidStart: startHp }), ...mark }, feroPart);
     if (maxHp) {
       bossStrikes.push(...struck.slice(1));
@@ -806,6 +833,7 @@ function fight(input, opts, skip) {
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
+  if (fireFx) notes.push(`${fireFx.label}: ${fireFx.pct}% of the igniting hit each second for ${fireFx.seconds} s; later hits refresh it and raise it if stronger.`);
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
   for (const n of blockNotes(blocks, { weapons: weapons.length })) notes.push(`Boss phases: ${n}.`);
   if (casting) {

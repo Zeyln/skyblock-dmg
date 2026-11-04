@@ -7,6 +7,7 @@ import {
   LUST_FOR_BLOOD_PER_LEVEL, lustForBloodCap, EXTRA_INFLICTION, TWILIGHT_POISON_MULT, SKYBLOCK_LEVEL_STATS,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
+  ARMOR_ENCHANTS, ARMOR_ULTIMATES, HABANERO_WEAPONS, ENEMIES,
 } from './data/mechanics.js';
 import { REFORGE_STONES } from './data/reforgeStones.js';
 import { applyPet } from './data/pets.js';
@@ -228,6 +229,36 @@ export function calculate(input) {
     }
   }
 
+  // Armor enchantments: an ultimate per piece; Thorns needs damage taken (not simulated).
+  const slayerBoss = ENEMIES.find((e) => e.name === target.enemy)?.group === 'Slayer bosses';
+  const habaneroWeapon = HABANERO_WEAPONS.includes((weapon.item?.id || '').replace(/^STARRED_/, ''));
+  let legionPct = 0;
+  const armorEnchants = {};
+  for (const p of input.armor || []) {
+    if (!p?.item) continue;
+    const def = p.ultimate?.id && ARMOR_ULTIMATES.find((u) => u.id === p.ultimate.id);
+    if (def) {
+      const lvl = Math.min(Math.max(def.minLevel || 1, p.ultimate.level || 1), def.values.length);
+      const v = def.values[lvl - 1];
+      const label = `${def.name} ${roman(lvl)} (${p.item.name})`;
+      if (def.effect === 'legion') {
+        const players = Math.min(def.max, Math.max(0, Math.floor(player.nearbyPlayers || 0)));
+        if (players) {
+          statPct.__all = (statPct.__all || 0) + v * players;
+          legionPct += v * players;
+        }
+      } else if (def.effect === 'wisdom') {
+        const int = Math.min(def.caps[lvl - 1], v * Math.floor(Math.max(0, player.expLevels || 0) / 5));
+        if (int) sources.push({ label, stats: { INTELLIGENCE: int } });
+      } else if (def.effect === 'habanero') {
+        if (habaneroWeapon && slayerBoss && !magic) additive.push({ label, value: v });
+      }
+    }
+    for (const e of ARMOR_ENCHANTS) if (p.enchants?.[e.id]) (armorEnchants[e.id] ??= []).push(p.item.name);
+  }
+  if (legionPct) notes.push(`Legion: +${+legionPct.toFixed(2)}% all combat stats (${Math.min(20, Math.floor(player.nearbyPlayers))} players nearby).`);
+  for (const e of ARMOR_ENCHANTS) if (armorEnchants[e.id]) notes.push(`${e.name} (${armorEnchants[e.id].join(', ')}): ${e.note}.`);
+
   // Pet
   const pet = applyPet(input.pet, {
     target, player, bow, magic, weaponId: weapon.item?.id, inDungeon: !!input.dungeonMode && input.dungeonMode !== 'none', extras: input.petExtras || {},
@@ -273,6 +304,7 @@ export function calculate(input) {
   const applied = {};
   const hitNumber = player.hitNumber || 0;
   let lightningPct = 0;
+  let fire = null; // Fire Aspect: { pct, seconds }, the simulation's
   let overloadPct = 0;
   let manaSteal = 0;
   for (const ench of ENCHANTS) {
@@ -291,6 +323,7 @@ export function calculate(input) {
     const label = `${ench.name} ${roman(lvl)}`;
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
     if (ench.sim === 'lightning') { lightningPct = v; continue; } // every 3rd hit, simulation only
+    if (ench.sim === 'fire') { if (!magic) fire = { pct: v, seconds: ench.seconds[Math.min(lvl, ench.seconds.length) - 1], label }; continue; }
     if (ench.overload) { overloadPct = v; continue; } // applied to crits below
     if (ench.manaSteal) { manaSteal = v; continue; } // mana on hit, the simulation's
     if (magic && NOT_ON_ABILITIES.includes(ench.id)) continue;
@@ -561,7 +594,7 @@ export function calculate(input) {
     catacombsLevel: clampCatacombs(input.catacombsLevel),
     cataBoost: catacombsBoost(input.catacombsLevel),
     baseDamage, strengthMult, initial, additiveMult, multMult, critMult, defense, defenseMult,
-    targetMaxHp: target.maxHp, lightningPct, speed,
+    targetMaxHp: target.maxHp, lightningPct, fire, speed,
     nonCrit, crit, expected, megaCrit, megaChance, overloadPct,
     // An enemy immune to bows takes nothing from arrows.
     ...(bow && arrowImmune ? { nonCrit: 0, crit: 0, expected: 0, megaCrit: 0 } : {}),

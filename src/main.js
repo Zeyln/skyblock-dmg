@@ -27,7 +27,7 @@ import {
   DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
   ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers, assumedAccessories, WEAPON_ABILITIES,
-  DAGGER_FAMILIES, daggerFamily, daggerPartner,
+  DAGGER_FAMILIES, daggerFamily, daggerPartner, ARMOR_ULTIMATES, ARMOR_ENCHANTS,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
   DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
 } from './data/mechanics.js';
@@ -476,7 +476,27 @@ function upgradeControls(kind, path) {
         update();
       }, { searchable: false });
     })) : null,
+    kind === 'armor' ? armorEnchantControls(path) : null,
   );
+}
+
+// An armor piece's ultimate enchantment and Thorns (data/mechanics.js ARMOR_ULTIMATES, ARMOR_ENCHANTS).
+function armorEnchantControls(path) {
+  const cur = getPath(`${path}.ultimate`);
+  const opts = [{ value: '', label: 'None', cls: 'muted' }, ...ARMOR_ULTIMATES.flatMap((u) => u.values.map((_, i) => i + 1)
+    .filter((lvl) => lvl >= (u.minLevel || 1)).map((lvl) => ({
+      value: `${u.id}:${lvl}`, group: u.name, label: `${u.name} ${roman(lvl)}`, cls: 'ench-ultimate', note: u.note ? 'no damage effect' : '',
+    })))];
+  return h('div', { class: 'grid', style: 'margin-top:10px' },
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Ultimate enchantment'),
+      actionSelect(null, opts, cur?.id ? `${cur.id}:${cur.level}` : '', (v) => {
+        const [id, level] = v.split(':');
+        setPath(`${path}.ultimate`, id ? { id, level: Number(level) } : null);
+        rerenderForm();
+      }, { ariaLabel: 'Ultimate enchantment' })),
+    ARMOR_ENCHANTS.map((e) => h('div', { class: 'field', title: e.note },
+      h('span', { class: 'field-label' }, e.name),
+      selectField(null, `${path}.enchants.${e.id}`, levelOptions(e.values.length), { num: true, rerender: true }))));
 }
 
 // Star dropdown sized to the item's upgrade count; labels show the stat boost at the chosen location.
@@ -544,6 +564,8 @@ function upgradeSummary(kind, path) {
     item.gem_slots?.length ? `${gems}/${item.gem_slots.length} gems` : '',
     books ? `${books} books` : '',
     p.artOfWar ? 'Art of War' : '',
+    p.ultimate?.id ? `${ARMOR_ULTIMATES.find((u) => u.id === p.ultimate.id)?.name} ${roman(p.ultimate.level)}` : '',
+    p.enchants?.thorns ? `Thorns ${roman(p.enchants.thorns)}` : '',
     PRICE_ITEMS[item.id] && p.price ? `bought ${fmt(p.price)}` : '',
   ) || 'none';
 }
@@ -731,7 +753,18 @@ function armorSection() {
     setBonusPanel('armor'),
     ARMOR_SLOTS.map((slot) =>
       compactSlot('armor', `armor.${slot}`, items.armor[slot], slot[0] + slot.slice(1).toLowerCase())),
+    armorConditions(),
   ]);
+}
+
+// Inputs the worn armor ultimates need, shown only once one of them is on a piece.
+function armorConditions() {
+  const has = (id) => ARMOR_SLOTS.some((s) => state.armor[s].id && state.armor[s].ultimate?.id === id);
+  const fields = [
+    has('legion') ? numField('Players nearby (Legion)', 'player.nearbyPlayers', { min: 0, max: 20, step: 1 }) : '',
+    has('wisdom') ? numField('Experience levels (Wisdom)', 'player.expLevels', { min: 0, step: 1 }) : '',
+  ].filter(Boolean);
+  return fields.length ? [h('h3', {}, 'Enchantment conditions'), h('div', { class: 'grid' }, fields)] : '';
 }
 
 // Shared leading words of item names ("Necron's Helmet", "Necron's Boots" -> "Necron's").
@@ -1708,6 +1741,7 @@ function renderSim(body, startDelay = 0) {
   const bonusNames = [...new Set(events.flatMap((e) => e.bonuses))];
   const procs = {
     ...(s.spellName ? { cast: proc(`${s.spellName} cast`) } : {}),
+    ...(s.fireTicks ? { fire: proc('Fire Aspect burn') } : {}),
     hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
   };
   // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
@@ -1785,6 +1819,7 @@ function renderSim(body, startDelay = 0) {
       dps.v.textContent = e.t >= 1 ? fmt(total / e.t) : '—';
       // Ferocity strikes arrive as their own event a moment after the hit.
       if (e.ability) procs.cast.fire();
+      else if (e.fire) procs.fire.fire();
       else if (!e.feroOnly) procs.hit.fire();
       if (e.mana != null) mana.v.textContent = fmt(e.mana);
       if (e.ferocity) procs.ferocity.fire();
