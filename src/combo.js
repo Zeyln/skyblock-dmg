@@ -1,5 +1,5 @@
 // Themed dropdown that replaces <select> and <input list>.
-// The open list is rendered into document.body with fixed positioning so the panels
+// The open list is rendered into document.body (or the open dialog) with fixed positioning so the panels
 // (clipped to their pixel-edge shape) can't cover or clip it.
 import { h } from './dom.js';
 import { renderFormatted } from './mctext.js';
@@ -47,6 +47,8 @@ export function combo(options, value, onSelect, opts = {}) {
   const find = (v) => options.find((o) => String(o.value) === String(v ?? ''));
   let current = find(value);
   const root = h('div', { class: `combo${opts.disabled ? ' is-disabled' : ''}${searchable ? ' is-search' : ''}${opts.className ? ` ${opts.className}` : ''}` });
+  // Inside a modal <dialog> the list must render in the dialog (the top layer covers document.body).
+  const layer = () => root.closest('dialog') || document.body;
 
   const labelNode = (o) => (opts.display ? opts.display(o) : optionLabel(o));
   let trigger;
@@ -215,7 +217,7 @@ export function combo(options, value, onSelect, opts = {}) {
           clearTimeout(hoverTimer); // reached the flyout: keep it, and keep its group highlighted
           if (flyActive !== j || !inFly || active !== i) { flyActive = j; inFly = true; active = i; paintActive(); }
         }))));
-      document.body.append(fly);
+      layer().append(fly);
       flyActive = -1;
       positionFly();
     }
@@ -287,7 +289,7 @@ export function combo(options, value, onSelect, opts = {}) {
     // mousedown inside the list (incl. its scrollbar) must not blur the trigger and close the list.
     pop = h('div', { class: `combo-pop glass${opts.className ? ` ${opts.className}` : ''}`, role: 'listbox', id: `${id}-list`, onmousedown: (e) => e.preventDefault() },
       h('div', { class: `combo-list${opts.columns ? ' is-grid' : ''}`, style: opts.columns ? `grid-template-columns: repeat(${opts.columns}, minmax(0, 1fr))` : null }));
-    document.body.append(pop);
+    layer().append(pop);
     render();
     // Field hidden under the header, or too close to an edge for the list to fit on either side
     // (e.g. at the very bottom of the window): scroll it towards the middle first.

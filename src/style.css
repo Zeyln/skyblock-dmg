@@ -697,6 +697,13 @@ button.danger { --face: var(--crit); background: var(--crit); --bc: var(--crit);
 button.danger:hover { --face: var(--danger-hover); background: var(--danger-hover); color: var(--on-accent); --bc: var(--danger-hover); }
 button.primary:hover { color: var(--on-accent); }
 .modal-check { margin: -6px 0 18px; font-size: 13px; }
+/* Build preset picker: three dropdowns and a summary of what loads. */
+.modal:has(.preset-pick) { width: min(600px, calc(100vw - 32px)); }
+.preset-pick .grid { margin-bottom: 14px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.preset-summary { margin-bottom: 14px; font-size: 13px; }
+.preset-summary td:first-child { color: var(--muted); white-space: nowrap; padding-right: 12px; width: 1%; }
+.preset-summary td:not(:first-child) { text-align: left; white-space: normal; padding-left: 0; }
+.preset-pick .modal-check { margin: 0 0 18px; }
 
 /* Simulate button in the damage panel, with a pixel play triangle drawn like the chevrons. */
 .sim-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 16px; }

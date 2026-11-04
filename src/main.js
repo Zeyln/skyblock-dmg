@@ -11,6 +11,7 @@ import { createSimGraphic } from './simGraphic.js';
 import { PHASE_LABELS } from './bossMechanics.js';
 import { summarize } from './simResults.js';
 import { mobSprite } from './data/mobSprites.js';
+import { PRESET_SECTIONS, STAGES, PRESETS_REVIEWED, presetState } from './data/presets.js';
 import {
   weaponAbility, WITHER_BLADES, WITHER_SCROLLS, greedBase, mageStats, mageCooldownPct, DEPLOYABLES, MANA_POTION_MAX,
 } from './data/abilities.js';
@@ -1269,7 +1270,9 @@ function rerenderForm() {
   const form = document.getElementById('config');
   form.replaceChildren(
     ...SECTIONS.map(([key]) => builders[key]()),
-    h('div', { style: 'display:flex;justify-content:flex-end' }, h('button', { type: 'button', class: 'ghost', onclick: () =>
+    h('div', { style: 'display:flex;justify-content:space-between;gap:8px' },
+      h('button', { type: 'button', class: 'ghost', onclick: openPresetModal }, 'Load preset'),
+      h('button', { type: 'button', class: 'ghost', onclick: () =>
       confirmModal({
         title: 'Reset all fields?',
         message: 'This clears your gear, pet, accessories, shards, buffs and target. It can\'t be undone.',
@@ -1279,6 +1282,82 @@ function rerenderForm() {
     }, 'Reset all fields')),
   );
   update();
+}
+
+// ---------- build presets ----------
+// The last preset picked is remembered per viewer (a convenience; the default is the first one).
+const PRESET_KEY = 'dpscalc.preset.v1';
+function lastPresetKey() {
+  try { return localStorage.getItem(PRESET_KEY) || ''; } catch { return ''; }
+}
+
+function openPresetModal() {
+  let [sectionId, buildId, stage] = lastPresetKey().split('/');
+  let keepTarget = false;
+  const pick = () => {
+    const section = PRESET_SECTIONS.find((s) => s.id === sectionId) || PRESET_SECTIONS[0];
+    const build = section.builds.find((b) => b.id === buildId) || section.builds[0];
+    const preset = build.presets.find((x) => x.stage === stage) || build.presets.at(-1);
+    sectionId = section.id; buildId = build.id; stage = preset.stage;
+    return { section, build, key: `${section.id}/${build.id}/${preset.stage}` };
+  };
+  const body = h('div', { class: 'preset-pick' });
+  const render = () => {
+    const { section, build, key } = pick();
+    const r = presetState(key, byId);
+    const name = (id) => byId.get(id)?.name || id;
+    const s = r.state;
+    const armorIds = ARMOR_SLOTS.map((k) => s.armor[k].id).filter(Boolean);
+    const stars = (p) => (p.stars ? ` · ★${p.stars}` : '');
+    const rows = [
+      ['Weapon', s.weapon.id ? `${name(s.weapon.id)}${stars(s.weapon)}` : '—'],
+      ['Armor', armorIds.length ? `${[...new Set(armorIds.map(name))].join(', ')}${stars(s.armor.CHESTPLATE)}` : '—'],
+      ['Equipment', EQUIP_SLOTS.map((k) => s.equipment[k.key].id).filter(Boolean).map(name).join(', ') || '—'],
+      ['Pet', s.pet.id ? `${petName(s.pet.id)} ${s.pet.level}` : '—'],
+      ['Class', s.dungeonClass.id && section.location === 'dungeon'
+        ? `${DUNGEON_CLASSES.find((c) => c.id === s.dungeonClass.id)?.name} ${s.dungeonClass.level}` : '—'],
+      ['Target', r.target || 'None (outside dungeons)'],
+    ];
+    body.replaceChildren(
+      h('div', { class: 'grid wide' },
+        actionSelect('Category', PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id,
+          (v) => { sectionId = v; buildId = ''; render(); }, { searchable: false }),
+        actionSelect('Build', section.builds.map((b) => [b.id, b.name]), build.id,
+          (v) => { buildId = v; render(); }, { searchable: false }),
+        actionSelect('Stage', (section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage,
+          (v) => { stage = v; render(); }, { searchable: false })),
+      h('table', { class: 'kv preset-summary' }, rows.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v)))),
+      r.missing.length ? h('p', { class: 'hint' }, `Not in the item list (left empty): ${r.missing.join(', ')}`) : '',
+      h('label', { class: 'check modal-check' },
+        h('input', { type: 'checkbox', checked: keepTarget, onchange: (e) => { keepTarget = e.target.checked; } }),
+        'Keep my current target'),
+    );
+  };
+  render();
+  confirmModal({
+    title: 'Load a build preset',
+    message: `A typical player's gear at each stage of current progression (reviewed ${PRESETS_REVIEWED}). It replaces your gear, pet, accessories, shards and buffs.`,
+    confirmLabel: 'Load preset',
+    extra: body,
+  }).then((ok) => {
+    if (!ok) return;
+    const { key } = pick();
+    try { localStorage.setItem(PRESET_KEY, key); } catch { /* ignore */ }
+    loadPreset(key, keepTarget);
+  });
+}
+
+function loadPreset(key, keepTarget) {
+  const r = presetState(key, byId);
+  if (!r) return;
+  const prev = state;
+  state = deepMerge(defaultState(), r.state);
+  state.sim = prev.sim; // simulation settings aren't part of a build
+  if (keepTarget) {
+    Object.assign(state, { target: prev.target, dungeonMode: prev.dungeonMode, dungeonFloor: prev.dungeonFloor });
+    rerenderForm();
+  } else if (r.target) chooseEnemy(r.target);
+  else rerenderForm();
 }
 
 // Generic two-way binding via data-path

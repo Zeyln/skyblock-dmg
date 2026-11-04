@@ -212,7 +212,10 @@ export const ENEMIES = [
   enemy('The End', 'Voidling Extremist', ['Ender'], 8000000, { families: ['Enderman'] }),
   enemy('The End', 'End Stone Protector', ['Construct', 'Ender'], 5000000, { boss: true, defense: 150 }),
 
-  enemy('Crimson Isle', 'Kuudra', ['Infernal', 'Cubic'], 0, { boss: true }),
+  enemy('Crimson Isle', 'Kuudra (not finished)', ['Infernal', 'Cubic'], 0, { boss: true }),
+  // Infernal tier's last phase (the Lair): Kuudra's final 25,000 of 100,000 health points count as
+  // 240M (the Odin mod's scaled display, 9,600 HP per point). The DPS phase's scaling isn't known.
+  enemy('Crimson Isle', 'Kuudra (Infernal Lair phase, not finished)', ['Infernal', 'Cubic'], 240000000, { boss: true }),
   enemy('Crimson Isle', 'Bladesoul', ['Wither', 'Skeletal', 'Arcane'], 50000000, { boss: true }),
   enemy('Crimson Isle', 'Barbarian Duke X', ['Humanoid', 'Animal'], 70000000, { boss: true }),
   enemy('Crimson Isle', 'Mage Outlaw', ['Humanoid', 'Arcane'], 70000000, { boss: true, blocks: OUTLAW_BLOCKS }),
