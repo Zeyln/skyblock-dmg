@@ -10,6 +10,7 @@ import { simulate } from './sim.js';
 import { createSimGraphic } from './simGraphic.js';
 import { PHASE_LABELS } from './bossMechanics.js';
 import { summarize } from './simResults.js';
+import { fromInstability } from './clock.js';
 import { mobSprite } from './data/mobSprites.js';
 import { PRESET_SECTIONS, STAGES, PRESETS_REVIEWED, presetState } from './data/presets.js';
 import {
@@ -55,7 +56,8 @@ const defaultState = () => ({
   tuning: {},
   accessoryInputs: { time: 'day' },
   // Simulation screen options.
-  sim: { mode: 'kill', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1 },
+  // The connection (clock.js): base ping (ms), and server (TPS, lag spikes) and client (jitter, stutter) instability, 0–100.
+  sim: { mode: 'kill', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1, serverInstability: 0, clientInstability: 0, ping: 0 },
   shards: {},
   pet: { id: '', rarity: 'LEGENDARY', level: 100, item: '' },
   petExtras: { bankCoins: 0, magicFind: 0, goldDigits: 0 },
@@ -1584,8 +1586,10 @@ function renderHero(r) {
     r.spell?.ability && (state.weapon.attack || 'left') !== 'left' ? h('div', { class: 'hero-stat' },
       h('span', { class: 'hero-lbl' }, `${r.spell.ability.name} · ${r.spell.ability.over ? 'a second' : 'a cast'}`),
       h('div', { class: 'hero-num' }, fmt(r.spell.ability.hit))) : '',
-    h('button', { type: 'button', class: 'primary sim-btn', onclick: startSimulation },
-      h('span', { class: 'play', 'aria-hidden': 'true' }), 'Simulate'),
+    h('div', { class: 'sim-actions' },
+      h('button', { type: 'button', class: 'sim-settings-btn', title: 'Simulation settings', onclick: openSimSettings }, 'Settings'),
+      h('button', { type: 'button', class: 'primary sim-btn', onclick: startSimulation },
+        h('span', { class: 'play', 'aria-hidden': 'true' }), 'Simulate')),
   );
   lastHero = { crit: r.crit, nonCrit: r.nonCrit, expected: r.expected };
 }
@@ -1682,6 +1686,63 @@ function openSimScreen() {
 // indicator on the left lights up for 100 ms whenever its action happens; the middle stays empty
 // for a graphic. Changing a setting re-runs with the same seed; "Restart" re-rolls.
 let simSeed = 1;
+// What the instability sliders mean right now (clock.js fromInstability), for the text under them.
+// Lag spikes and stutter grow with the sliders too, but the text only names TPS and jitter.
+const serverText = (v) => {
+  const c = fromInstability(v, 0);
+  return v ? `About ${+c.tps.toFixed(1)} TPS (±${+c.tpsVar.toFixed(1)})` : 'Stable: 20 TPS';
+};
+const clientText = (v) => {
+  const c = fromInstability(0, v);
+  return v ? `Ping varies by about ±${Math.round(c.jitter)} ms` : 'Steady ping';
+};
+// A 0–100 slider (state.sim[key]) with what it currently means under it.
+function instabilitySlider(label, key, describe) {
+  const value = state.sim[key] || 0;
+  const shown = h('b', {}, String(value));
+  const text = h('span', { class: 'muted' }, describe(value));
+  return h('label', { class: 'field instability' }, h('span', { class: 'field-label' }, label, ' ', shown),
+    h('input', { type: 'range', min: 0, max: 100, step: 5, value,
+      oninput: (e) => { shown.textContent = e.target.value; text.textContent = describe(Number(e.target.value)); },
+      onchange: (e) => { state.sim[key] = Number(e.target.value); saveState(); } }),
+    text);
+}
+
+// A number field for state.sim[key], clamped, with a note under it.
+function simNumber(label, key, min, max, step, note) {
+  return h('label', { class: 'field' }, label,
+    h('input', { type: 'number', min, max, step, value: state.sim[key] ?? min, placeholder: String(min),
+      onchange: (e) => { state.sim[key] = Math.min(max, Math.max(min, Number(e.target.value) || 0)); e.target.value = state.sim[key]; saveState(); } }),
+    h('span', { class: 'muted' }, note));
+}
+
+// Simulation settings (the button left of Simulate): the connection, for the next simulation.
+function openSimSettings() {
+  const dialog = h('dialog', { class: 'modal glass sim-settings-modal', 'aria-labelledby': 'sim-settings-title' },
+    h('div', { class: 'sim-head' },
+      h('h2', { id: 'sim-settings-title' }, 'Simulation settings'),
+      h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Done')),
+    h('h3', {}, 'Connection'),
+    h('p', { class: 'hint' }, 'How steady the server and your connection are. Used by the next simulation.'),
+    h('div', { class: 'sim-settings-grid' },
+      simNumber('Base ping (ms)', 'ping', 0, 2000, 1, 'Round trip; delays your clicks and reactions'),
+      h('span'),
+      instabilitySlider('Server instability', 'serverInstability', serverText),
+      instabilitySlider('Client instability', 'clientInstability', clientText)));
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('click', (e) => {
+    if (e.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close();
+  });
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+// The simulated player (clock.js), fixed: no mistakes, at human speed. Even clicks per second, right
+// click spammed (or 'hold': every 4 ticks), and reaction time (ms).
+const SIM_PLAYER = { cps: 8, rightClick: 'spam', reactionMs: 160 };
+
 let simTimer = 0;
 const SIM_FLASH_MS = 100;
 const stopSimPlayback = () => { clearInterval(simTimer); simTimer = 0; };
@@ -1697,7 +1758,7 @@ function renderSim(body, startDelay = 0) {
   const segmented = (name, options, value, onPick) => h('div', { class: 'segmented' }, options.map(([v, label]) =>
     h('label', {}, h('input', { type: 'radio', name, checked: value === v, onchange: () => onPick(v) }), label)));
 
-  const s = simulate(buildInput(), { ...o, seed: simSeed });
+  const s = simulate(buildInput(), { ...o, ...SIM_PLAYER, seed: simSeed });
   const events = s.error ? [] : s.events;
   let paused = false;
   const playBtn = h('button', { type: 'button', class: 'primary', onclick: () => {

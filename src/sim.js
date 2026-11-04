@@ -7,6 +7,7 @@ import {
 } from './data/mechanics.js';
 import { phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines, scheduledPhases } from './bossMechanics.js';
 import { DUNGEON_HIT_MANA } from './data/abilities.js';
+import { makeClock, CLOCKS } from './clock.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
 export const SIM_MAX_SECONDS = 600;
@@ -58,6 +59,11 @@ function fight(input, opts, skip) {
   const mode = opts.mode === 'kill' ? 'kill' : 'duration';
   const duration = Math.max(0.05, opts.duration || 30);
   const random = rng(opts.seed ?? 1);
+  // Game time (ticks) against real time: tickspeed, lag spikes and ping (clock.js). Everything below runs in
+  // game seconds; real-time cooldowns and the player's actions go through the clock, and the results are
+  // turned into real time at the end.
+  const clock = makeClock(opts, mode === 'kill' ? SIM_MAX_SECONDS : duration);
+  const toTick = (g) => (clock.plain ? Math.round(g * TICKS_PER_SECOND) : Math.ceil(g * TICKS_PER_SECOND - 1e-6));
   const notes = [];
 
   // The player's health stays where it starts until a health system exists (god mode or not).
@@ -109,8 +115,19 @@ function fight(input, opts, skip) {
     }
   };
   const hitMana = (base.inDungeon ? DUNGEON_HIT_MANA.flat + maxMana * DUNGEON_HIT_MANA.pct / 100 : 0) + maxMana * (base.manaSteal || 0) / 100;
-  let nextSwing = 0;
-  let nextCast = 0;
+  // The first click: the player sees the boss half a ping after it spawns, and the click reaches the
+  // server half a ping later, so the first hit or cast lands a round trip in (ping 0: at the spawn).
+  const firstTick = clock.rtt || clock.reaction ? Math.ceil(clock.action(0, 0) * TICKS_PER_SECOND - 1e-6) : 0;
+  // Clicks (clock.js): melee hits wait for a left click, casts and shortbow shots for a right click; a
+  // drawn bow fires on release, at its own pace.
+  const swingSide = !bow ? 'left' : SHORTBOWS.includes(input.weapon?.item?.id) ? 'right' : null;
+  const onClick = (k, side) => (side ? clock.clickTick(k, side) : k);
+  // A right-click shot ready at game time g fires at the first tick with a click waiting (none modelled: at g).
+  const shotAt = (g) => (clock.clicks ? onClick(Math.ceil(g * TICKS_PER_SECOND - 1e-6), 'right') / TICKS_PER_SECOND : g);
+  // n shots at most gap game seconds apart, the first ready at g: when the last one's cooldown ends.
+  const rightShots = (g, n, gap) => { for (let i = 0; i < n; i++) g = shotAt(g) + gap; return g; };
+  let nextSwing = firstTick;
+  let nextCast = firstTick;
   const dots = []; // ticks of damage over time still to land
   // Fire Aspect's burn on the boss: { dmg, until, next } (ticks). Each second it deals pct% of dmg, the
   // strongest hit since it was lit; a melee hit lights or refreshes it.
@@ -119,7 +136,8 @@ function fight(input, opts, skip) {
   // A cost that climbs with each cast (Jerry-chine Gun) until manaReset passes without one.
   let streak = 0;
   let lastCast = -Infinity;
-  const resetTick = () => lastCast + (spell.manaReset || 0) * TICKS_PER_SECOND;
+  const resetTick = () => (clock.plain ? lastCast + (spell.manaReset || 0) * TICKS_PER_SECOND
+    : toTick(clock.after(lastCast / TICKS_PER_SECOND, spell.manaReset || 0, CLOCKS.manaReset)));
   const costAt = (tick) => spell.manaCost + (spell.manaStep && tick < resetTick() ? spell.manaStep * streak : 0);
   // When the next cast can go off: its cooldown is up and there's the mana (regen comes each whole second).
   // A climbing cost may be cheaper to wait out until it resets.
@@ -132,7 +150,8 @@ function fight(input, opts, skip) {
     return Math.max(nextCast, at);
   };
   // The next tick something is due (never before now).
-  const wake = (tick) => Math.max(tick, Math.min(swinging ? nextSwing : Infinity, casting ? castReady() : Infinity,
+  const wake = (tick) => Math.max(tick, Math.min(swinging ? onClick(Math.max(nextSwing, tick), swingSide) : Infinity,
+    casting ? onClick(Math.max(castReady(), tick), 'right') : Infinity,
     casting && nextCast > tick ? nextCast : Infinity, dots.length ? dots[0] : Infinity, fire ? fire.next : Infinity));
 
   // Weapons the player swaps between: the main one, and a second Blaze Slayer dagger (input.weapon2).
@@ -202,7 +221,7 @@ function fight(input, opts, skip) {
     }
     return events.slice(from - 1); // the hit, then its strikes
   };
-  const endTick = Math.round((mode === 'kill' ? SIM_MAX_SECONDS : duration) * TICKS_PER_SECOND);
+  const endTick = Math.round(clock.game(mode === 'kill' ? SIM_MAX_SECONDS : duration) * TICKS_PER_SECOND);
   let total = 0;
   let stacks = 0;
   let lastStackTick = -Infinity;
@@ -299,11 +318,12 @@ function fight(input, opts, skip) {
     // strikes one by one. Shooting stops once the strikes on their way break it before the next shot.
     const shots = [];
     const times = [];
-    let at = t;
+    let at = clock.action(t, 0); // the player sees the shield, then starts shooting
     let breakAt = Infinity;
     let rolled = 0; // Ferocity strikes from the explosions
     trackStats({ ...termStats, FEROCITY: termFero });
     for (;;) {
+      at = shotAt(at); // each shot waits for a right click
       shots.push(at);
       for (let a = 0; a < TERMINATOR_ARROWS; a++) {
         times.push(at);
@@ -327,6 +347,10 @@ function fight(input, opts, skip) {
   const immune = []; // [start, end) windows the boss takes no damage in (damage over time is lost)
   // The player's own pauses go one after another: a new one starts once any earlier one is over.
   const playerBusy = [];
+  // Client stutter (clock.js): no clicks reach the server until half a ping after the client is back.
+  // The server runs on meanwhile, so damage over time and Ferocity strikes still land.
+  // (With clicks modelled, stutter just means no clicks; clock.js handles it.)
+  if (!clock.clicks) for (const [a, b] of clock.stutters) blocked.push([clock.game(a), clock.game(b + clock.rtt / 2)]);
   // Wipe mechanics as they land: { id, kind (its row), name, land, deadline, clutch }.
   const mechanics = [];
   const wipe = (b, land) => {
@@ -335,13 +359,17 @@ function fight(input, opts, skip) {
     return skip.has(id);
   };
   // How long the player spends dealing with one: fixed, random in [min, max], or reaching it and hitting it.
-  const stopFor = ({ stop }) => (Array.isArray(stop) ? stop[0] + random() * (stop[1] - stop[0])
-    : typeof stop === 'object' ? stop.reach + stop.hits * ticksPerHit / TICKS_PER_SECOND : stop);
-  const pause = (kind, start, length, phaseStart = start) => {
+  // human: real seconds (moving, aiming); ticks: game seconds of in-game work (hits on it).
+  const stopFor = ({ stop }) => (Array.isArray(stop) ? { human: stop[0] + random() * (stop[1] - stop[0]), ticks: 0 }
+    : typeof stop === 'object' ? { human: stop.reach, ticks: stop.hits * ticksPerHit / TICKS_PER_SECOND } : { human: stop, ticks: 0 });
+  // A player action: human real seconds (plus the ping round trip, clock.js), then ticks of in-game work.
+  // shots: { n, gap }, right-click shots in place of ticks, each waiting for a click.
+  const pause = (kind, start, human, phaseStart = start, ticks = 0, shots = null) => {
     for (const [s, e] of playerBusy) if (start >= s && start < e) start = e;
-    playerBusy.push([start, start + length]);
-    blocked.push([start, start + length]);
-    const phase = { kind, start: phaseStart, end: start + length };
+    const end = shots && clock.clicks ? rightShots(clock.action(start, human), shots.n, shots.gap) : clock.action(start, human, ticks);
+    playerBusy.push([start, end]);
+    blocked.push([start, end]);
+    const phase = { kind, start: phaseStart, end };
     phases.push(phase);
     return phase;
   };
@@ -450,7 +478,7 @@ function fight(input, opts, skip) {
     hitshield: (t) => raiseShield(phases.find((p) => p.kind === 'laser' && t >= p.start && t < p.end)?.end ?? t),
     demonsplit: split,
     callThePups: callPups,
-    webOfLies: (t, f, b) => { pause('web', t, WEB_SWAP_S + b.hits * sacShot).shots = b.hits; },
+    webOfLies: (t, f, b) => { pause('web', t, WEB_SWAP_S, t, b.hits * sacShot, { n: b.hits, gap: sacShot }).shots = b.hits; },
     beams: (t, f, b) => {
       phases.push({ kind: 'laser', start: t, end: t + b.immune });
       blocked.push([t, t + b.immune]);
@@ -487,7 +515,7 @@ function fight(input, opts, skip) {
       while (x.next !== null && t >= x.next && !(x.b.afterShield && shield)) {
         const stop = stopFor(x.b);
         if (!wipe(x.b, x.next)) {
-          const p = pause(x.b.row, x.next + (x.b.hitFor || 0), stop, x.next);
+          const p = pause(x.b.row, x.next + (x.b.hitFor || 0), stop.human, x.next, stop.ticks);
           if (x.b.stop?.hits) p.hits = x.b.stop.hits; // hits on it (a Fire Pillar)
         }
         x.next += x.b.every;
@@ -516,8 +544,8 @@ function fight(input, opts, skip) {
     }
     const action = dots.length && dots[0] <= tick ? 'dot'
       : fire && fire.next <= tick ? 'fire'
-      : casting && tick >= castReady() ? 'cast'
-        : swinging && tick >= nextSwing ? 'swing' : null;
+      : casting && tick >= castReady() && tick >= onClick(tick, 'right') ? 'cast'
+        : swinging && tick >= nextSwing && tick >= onClick(tick, swingSide) ? 'swing' : null;
     if (!action) {
       tick = Math.max(tick + 1, wake(tick));
       n--;
@@ -606,13 +634,14 @@ function fight(input, opts, skip) {
     const bonuses = [];
     if (swing) {
       // Dominus: a melee hit gains a stack if the last one was long enough ago; at 10 stacks it swipes.
-      if (dominusEvery && tick - lastStackTick >= dominusEvery * TICKS_PER_SECOND) {
+      if (dominusEvery && (clock.plain ? tick - lastStackTick >= dominusEvery * TICKS_PER_SECOND
+        : tick >= toTick(clock.after(lastStackTick / TICKS_PER_SECOND, dominusEvery, CLOCKS.dominusGain)))) {
         swipeReady = stacks === DOMINUS_MAX;
         stacks = Math.min(DOMINUS_MAX, stacks + 1);
         lastStackTick = tick;
       }
       // Golem pet Toss: every 5th hit, at most once per 5 s.
-      const toss = input.pet?.id === 'GOLEM' && n % 5 === 0 && t - lastToss >= 5;
+      const toss = input.pet?.id === 'GOLEM' && n % 5 === 0 && (CLOCKS.petCooldown === 'real' ? clock.real(t) - clock.real(lastToss) : t - lastToss) >= 5;
       if (toss) lastToss = t;
       r = hitResult(n, stacks, w, toss);
       trackStats(r.totals);
@@ -653,7 +682,8 @@ function fight(input, opts, skip) {
         streak = spell.manaStep && tick < resetTick() ? streak + 1 : 1;
         lastCast = tick;
         lowestMana = Math.min(lowestMana, mana);
-        nextCast = tick + castEvery;
+        nextCast = clock.plain ? tick + castEvery : Math.max(tick + 1, tick + (spell.over || 0) * TICKS_PER_SECOND,
+          toTick(clock.after(t, spell.cooldown, CLOCKS.abilityCooldown)));
         for (let k = 1; k < spell.over; k++) dots.push(tick + k * TICKS_PER_SECOND);
         out.casts++;
       } else {
@@ -809,7 +839,7 @@ function fight(input, opts, skip) {
   const fatal = killedAt === null ? -1 : events.findIndex((e) => e.tid === lastTid && e.hp <= 0);
   if (fatal >= 0) killedAt = events[fatal].t;
 
-  const limit = mode === 'kill' ? SIM_MAX_SECONDS : duration;
+  const limit = clock.game(mode === 'kill' ? SIM_MAX_SECONDS : duration);
   const despawned = killedAt === null && despawnS !== null && despawnS < limit;
   const seconds = killedAt ?? (despawned ? despawnS : limit);
   // Strikes still pending at the kill, the despawn or the end of the time never land.
@@ -828,6 +858,37 @@ function fight(input, opts, skip) {
   if (heads.length) phases.push({ kind: 'heads', start: heads[0], end: seconds });
   for (const p of phases) p.end = Math.min(p.end, seconds);
   for (let i = phases.length - 1; i >= 0; i--) if (phases[i].start >= seconds && scheduled.includes(phases[i])) phases.splice(i, 1); // never got to it
+  // Into real time (clock.js): every event, phase, mechanic and wait on mana.
+  let fightSeconds = seconds;
+  let killReal = killedAt;
+  if (!clock.plain) {
+    const R = clock.real;
+    for (const e of events) e.t = R(e.t);
+    for (const p of phases) {
+      p.start = R(p.start);
+      p.end = R(p.end);
+      if (p.shots) p.shots = p.shots.map(R);
+      if (p.left) p.left = p.left.map(([x, k]) => [R(x), k]);
+    }
+    for (const m of mechanics) {
+      m.land = R(m.land);
+      m.deadline = R(m.deadline);
+    }
+    for (const w of manaWaits) w.splice(0, 2, R(w[0]), R(w[1]));
+    killReal = killedAt === null ? null : R(killedAt);
+    fightSeconds = R(seconds);
+  }
+  if (!clock.plain || clock.rtt || clock.stutters.length || clock.clicks || clock.reaction) {
+    const c = clock.settings;
+    const inFight = (list) => list.filter((x) => x <= fightSeconds).length;
+    const server = [c.tps < 20 || c.tpsVar ? `${+c.tps.toFixed(1)} TPS on average${c.tpsVar ? ` (±${+c.tpsVar.toFixed(1)})` : ''}` : '',
+      clock.freezes.length ? `${inFight(clock.freezes.map((f) => clock.real(f.g)))} lag spikes of about ${Math.round(c.lagMs)} ms` : ''].filter(Boolean);
+    const client = [c.ping ? `${Math.round(c.ping)} ms ping${c.jitter ? ` (±${Math.round(c.jitter)})` : ''}` : '',
+      clock.stutters.length ? `${inFight(clock.stutters.map(([a]) => a))} stutters of about ${Math.round(c.stutterMs)} ms` : '',
+      c.cps ? `${c.cps} clicks a second (right click ${c.rightClick === 'hold' ? 'held: every 4 ticks' : 'spammed'})` : '',
+      c.reactionMs ? `${Math.round(c.reactionMs)} ms reaction time` : ''].filter(Boolean);
+    notes.push(`Connection: ${[server.length ? `server ${server.join(', ')}` : '', client.length ? `client ${client.join(', ')}` : ''].filter(Boolean).join('; ')}. Hit rate, Ferocity, damage over time, mana regen and boss timers run on server ticks; ability and other cooldowns in real time (assumed); your reactions take real time plus a ping round trip.`);
+  }
   if (despawned) notes.push(`The boss despawned after ${despawnS / 60} minutes: the Slayer quest failed.`);
   else if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
@@ -844,9 +905,9 @@ function fight(input, opts, skip) {
   if (!blocks.length && input.target?.boss) notes.push('Boss damage caps are not modelled.');
 
   return {
-    mode, seconds, killedAt, despawned, maxHp: base.targetMaxHp || 0, startHp,
-    endHp: hp, total, dps: seconds > 0 ? total / seconds : 0,
-    hitsPerSecond: TICKS_PER_SECOND / ticksPerHit, ...out, events, phases, notes, mechanics, statRanges,
+    mode, seconds: fightSeconds, killedAt: killReal, despawned, maxHp: base.targetMaxHp || 0, startHp,
+    endHp: hp, total, dps: fightSeconds > 0 ? total / fightSeconds : 0,
+    hitsPerSecond: clock.tps / ticksPerHit, ...out, events, phases, notes, mechanics, statRanges,
     // The ability, if cast: its name, and the mana pool and its lowest point.
     attack: casting ? attack : 'left', spellName: spell?.name || null, maxMana, lowestMana: casting ? lowestMana : null,
     manaWaits: casting ? manaWaits : null,
