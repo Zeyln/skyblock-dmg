@@ -81,6 +81,23 @@ describe('build presets', () => {
     const t = tunePreset(input, r.tune);
     expect(t.equipment.WRIST.id).toBe('FLAMING_FIST');
     expect(t.equipment.WRIST.item).toBeUndefined();
+    expect(t.equipment.WRIST.price).toBeUndefined();
+  });
+
+  it('takes the cheapest of the pieces within 1.5% of the best (Soulweaver Gloves over a hair-better Flaming Fist)', () => {
+    const byId = fakeItems();
+    byId.set('FLAMING_FIST', { ...byId.get('FLAMING_FIST'), category: 'GLOVES', stats: { STRENGTH: 101 } }); // 7.5M
+    byId.set('SOULWEAVER_GLOVES', { ...byId.get('SOULWEAVER_GLOVES'), category: 'GLOVES', stats: { STRENGTH: 100 } }); // 4.5M
+    const r = presetState('slayer/revenant/early', byId);
+    const pc = (p) => ({ ...p, item: byId.get(p.id) });
+    const input = { ...r.state, weapon: pc(r.state.weapon), armor: Object.values(r.state.armor).map(pc),
+      equipment: Object.values(r.state.equipment).map(pc), shards: {}, target: { mobs: [], families: [] } };
+    expect(tunePreset(input, r.tune).equipment.WRIST.id).toBe('SOULWEAVER_GLOVES');
+    // Clearly better is still worth paying for.
+    byId.set('FLAMING_FIST', { ...byId.get('FLAMING_FIST'), stats: { STRENGTH: 200 } });
+    const r2 = presetState('slayer/revenant/early', byId);
+    const input2 = { ...input, equipment: Object.values(r2.state.equipment).map(pc) };
+    expect(tunePreset(input2, r2.tune).equipment.WRIST.id).toBe('FLAMING_FIST');
   });
 
   it('leaves the power stone, tuning, shards and armor ultimates to the calculator', () => {

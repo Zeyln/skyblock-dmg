@@ -87,6 +87,10 @@ const EQ_POOL = {
     GAUNTLET_OF_CONTAGION: 2.2, MOLTEN_BRACELET: 1.9, VANQUISHED_GLOWSTONE_GAUNTLET: 0.9, SNOW_GLOVES: 0.2, GLOWSTONE_GAUNTLET: 0.08 },
 };
 const EQ_PRICE_CAP = { early: 10, mid: 70, end: Infinity };
+// Value over a sliver of damage (early and mid): after the best set, swaps to cheaper pieces are made, the most
+// coins saved per damage lost first, while the whole set stays within this share of the best set's damage. A
+// piece without a price here counts as the dearest. Endgame keeps the best set.
+const EQ_TOLERANCE = { early: 0.015, mid: 0.015, end: 0 };
 const EQ_MILESTONE = { DAVIDS_CLOAK: 30 };
 
 const LION = { id: 'LION', rarity: 'LEGENDARY', level: 100, item: 'PET_ITEM_SHARPENED_CLAWS_UNCOMMON' };
@@ -336,7 +340,7 @@ export function presetState(key, byId) {
   // The pieces the calculator may pick from (with their items): the default and the pool within the price limit.
   const eqPool = Object.fromEntries(EQ_SLOTS.map((s) => {
     const ids = new Set([eqIds[s], ...Object.entries(EQ_POOL[s]).filter(([, m]) => m <= EQ_PRICE_CAP[level]).map(([id]) => id)]);
-    return [s, [...ids].filter((id) => id && byId.has(id)).map((id) => ({ ...eqPiece(id), item: byId.get(id) }))];
+    return [s, [...ids].filter((id) => id && byId.has(id)).map((id) => ({ ...eqPiece(id), item: byId.get(id), price: EQ_POOL[s][id] ?? Infinity }))];
   }));
 
   const points = tuningPoints(lv.mp);
@@ -402,7 +406,8 @@ export function tunePreset(input, tune) {
     if (score(alt) > score(cur)) cur = alt;
   }
 
-  // Equipment, slot by slot, twice round (for pieces that work together): the piece that adds the most.
+  // Equipment, slot by slot, twice round (for pieces that work together): the piece that adds the most. Then
+  // (early and mid) cheaper pieces while the set stays within EQ_TOLERANCE of the best set's damage.
   let equipment = null;
   if (tune.equipment) {
     const eq = EQ_SLOTS.map((s, i) => cur.equipment?.[i] || tune.equipment[s][0] || { id: '' });
@@ -415,8 +420,31 @@ export function tunePreset(input, tune) {
       }
       eq[i] = best;
     });
+    const tol = EQ_TOLERANCE[level] || 0;
+    if (tol) {
+      const top = score({ ...cur, equipment: eq });
+      const floor = top * (1 - tol);
+      const price = (p) => p.price ?? Infinity;
+      for (let guard = 0; guard < 16; guard++) {
+        const now = score({ ...cur, equipment: eq });
+        let pick = null;
+        EQ_SLOTS.forEach((s, i) => {
+          for (const p of tune.equipment[s]) {
+            const saved = price(eq[i]) - price(p);
+            if (!(saved > 0)) continue;
+            const sc = score({ ...cur, equipment: eq.map((q, j) => (j === i ? p : q)) });
+            if (sc < floor) continue;
+            // Coins saved per share of damage lost (a swap that loses nothing ranks first).
+            const worth = saved / Math.max(1e-9, (now - sc) / top);
+            if (!pick || worth > pick.worth) pick = { i, p, worth };
+          }
+        });
+        if (!pick) break;
+        eq[pick.i] = pick.p;
+      }
+    }
     cur.equipment = eq;
-    equipment = Object.fromEntries(EQ_SLOTS.map((s, i) => { const { item, ...p } = eq[i]; return [s, p]; }));
+    equipment = Object.fromEntries(EQ_SLOTS.map((s, i) => { const { item, price, ...p } = eq[i]; return [s, p]; }));
   }
 
   // Armor ultimates, piece by piece: the one that adds the most (Legion when none adds anything).

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { simulate } from './sim.js';
 import { calculate } from './calc.js';
-import { summarize } from './simResults.js';
+import { summarize, summarizeRuns, runRecord } from './simResults.js';
 import { meleeHitTicks, shortbowTicks } from './data/mechanics.js';
 import { petNumbers, cleanLore } from './data/pets.js';
 
@@ -837,5 +837,57 @@ describe('Fire Aspect', () => {
     expect(summarize(s).highestHit).toBe(200); // burn ticks aren't hits
     // No effect on a single hit.
     expect(calculate(noCrit({ item: sword({ DAMAGE: 95 }), enchants: { fire_aspect: 3 } })).nonCrit).toBe(100);
+  });
+});
+
+describe('several runs (summarizeRuns)', () => {
+  const rec = (seed, killedAt, total = 1000, extra = {}) => ({ seed, killedAt, despawned: false, seconds: killedAt ?? 30, total, dps: total / (killedAt ?? 30), ...extra });
+  it('time to kill: average, median, spread, extremes and Tukey outliers', () => {
+    const runs = [10, 11, 12, 12, 13, 14, 40].map((t, i) => rec(i + 1, t));
+    const b = summarizeRuns(runs, 'kill');
+    expect(b.metric).toBe('time');
+    expect(b.main.mean).toBeCloseTo(16);
+    expect(b.main.median).toBe(12);
+    expect(b.main.min).toBe(10);
+    expect(b.main.max).toBe(40);
+    expect(b.main.outliers.map((x) => x.value)).toEqual([40]);
+    expect(b.best).toBe(1);
+    expect(b.worst).toBe(7);
+    expect([3, 4]).toContain(b.median);
+  });
+  it('counts failed and unfinished runs; time only over the kills', () => {
+    const runs = [rec(1, 20), rec(2, null, 500, { despawned: true }), rec(3, null), rec(4, 30)];
+    const b = summarizeRuns(runs, 'kill');
+    expect([b.killed, b.failed, b.alive]).toEqual([2, 1, 1]);
+    expect(b.main.count).toBe(2);
+  });
+  it('fixed duration: by damage dealt, most damage best', () => {
+    const b = summarizeRuns([rec(1, null, 900), rec(2, null, 1200), rec(3, null, 1000)], 'duration');
+    expect(b.metric).toBe('damage');
+    expect(b.best).toBe(2);
+    expect(b.worst).toBe(1);
+    expect(b.median).toBe(3);
+  });
+  it('a batch of real fights: each seed repeats the same fight', () => {
+    const input = { weapon: { item: sword({ DAMAGE: 95, CRITICAL_CHANCE: 20 }) }, target: { maxHp: 20000 } };
+    const runs = [1, 2, 3, 4, 5].map((seed) => runRecord(simulate(input, { mode: 'kill', seed }), seed));
+    const b = summarizeRuns(runs, 'kill');
+    expect(simulate(input, { mode: 'kill', seed: b.median }).killedAt).toBe(runs.find((r) => r.seed === b.median).killedAt);
+    expect(b.main.min).toBeLessThanOrEqual(b.main.median);
+  });
+});
+
+describe('run curves for the graph (runRecord)', () => {
+  it('from 0 to the run total at its end, rising, at most about 120 points', () => {
+    const input = { weapon: { item: sword({ DAMAGE: 95, CRITICAL_CHANCE: 20 }) }, target: { maxHp: 60000 } };
+    const s = simulate(input, { mode: 'kill', seed: 3 });
+    const c = runRecord(s, 3).curve;
+    expect(c[0]).toEqual([0, 0]);
+    expect(c.at(-1)).toEqual([s.killedAt, s.total]);
+    expect(c.length).toBeLessThanOrEqual(122);
+    for (let i = 1; i < c.length; i++) {
+      expect(c[i][0]).toBeGreaterThanOrEqual(c[i - 1][0]);
+      expect(c[i][1]).toBeGreaterThanOrEqual(c[i - 1][1]);
+    }
   });
 });

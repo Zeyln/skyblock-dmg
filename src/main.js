@@ -9,10 +9,10 @@ import { detectSets, evaluateSets } from './data/sets.js';
 import { simulate } from './sim.js';
 import { createSimGraphic } from './simGraphic.js';
 import { PHASE_LABELS } from './bossMechanics.js';
-import { summarize } from './simResults.js';
+import { summarize, runRecord, summarizeRuns } from './simResults.js';
 import { fromInstability } from './clock.js';
 import { mobSprite } from './data/mobSprites.js';
-import { PRESET_SECTIONS, STAGES, PRESETS_REVIEWED, presetState, tunePreset } from './data/presets.js';
+import { PRESET_SECTIONS, STAGES, presetState, tunePreset } from './data/presets.js';
 import {
   weaponAbility, WITHER_BLADES, WITHER_SCROLLS, greedBase, mageStats, mageCooldownPct, DEPLOYABLES, MANA_POTION_MAX,
 } from './data/abilities.js';
@@ -57,7 +57,7 @@ const defaultState = () => ({
   accessoryInputs: { time: 'day' },
   // Simulation screen options.
   // The connection (clock.js): base ping (ms), and server (TPS, lag spikes) and client (jitter, stutter) instability, 0–100.
-  sim: { mode: 'kill', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1, serverInstability: 0, clientInstability: 0, ping: 0 },
+  sim: { mode: 'kill', duration: 30, enemyHpPct: 100, playerHpPct: 100, godMode: true, speed: 1, serverInstability: 0, clientInstability: 0, ping: 0, runs: 1 },
   shards: {},
   pet: { id: '', rarity: 'LEGENDARY', level: 100, item: '' },
   petExtras: { bankCoins: 0, magicFind: 0, goldDigits: 0 },
@@ -573,7 +573,7 @@ function upgradeSummary(kind, path) {
     item.gem_slots?.length ? `${gems}/${item.gem_slots.length} gems` : '',
     books ? `${books} books` : '',
     p.artOfWar ? 'Art of War' : '',
-    p.ultimate?.id ? `${ARMOR_ULTIMATES.find((u) => u.id === p.ultimate.id)?.name} ${roman(p.ultimate.level)}` : '',
+    kind === 'armor' && p.ultimate?.id ? `${ARMOR_ULTIMATES.find((u) => u.id === p.ultimate.id)?.name} ${roman(p.ultimate.level)}` : '',
     p.enchants?.thorns ? `Thorns ${roman(p.enchants.thorns)}` : '',
     PRICE_ITEMS[item.id] && p.price ? `bought ${fmt(p.price)}` : '',
   ) || 'none';
@@ -1348,32 +1348,19 @@ function openPresetModal() {
     sectionId = section.id; buildId = build.id; stage = preset.stage;
     return { section, build, key: `${section.id}/${build.id}/${preset.stage}` };
   };
+  // Every choice on show as buttons: the category, its builds, then the build's stages; one click each.
   const body = h('div', { class: 'preset-pick' });
+  const choices = (label, options, current, onPick, cls = '') => h('div', { class: 'preset-row' },
+    h('span', { class: 'preset-label' }, label),
+    h('div', { class: `preset-choices ${cls}`, role: 'group', 'aria-label': label }, options.map(([id, text]) =>
+      h('button', { type: 'button', class: id === current ? 'primary' : '', 'aria-pressed': String(id === current), onclick: () => onPick(id) }, text))));
   const render = () => {
     const { section, build, key } = pick();
     const r = presetState(key, byId);
-    const name = (id) => byId.get(id)?.name || id;
-    const s = r.state;
-    const armorIds = ARMOR_SLOTS.map((k) => s.armor[k].id).filter(Boolean);
-    const stars = (p) => (p.stars ? ` · ★${p.stars}` : '');
-    const rows = [
-      ['Weapon', s.weapon.id ? `${name(s.weapon.id)}${stars(s.weapon)}` : '—'],
-      ['Armor', armorIds.length ? `${[...new Set(armorIds.map(name))].join(', ')}${stars(s.armor.CHESTPLATE)}` : '—'],
-      ['Equipment', EQUIP_SLOTS.map((k) => s.equipment[k.key].id).filter(Boolean).map(name).join(', ') || '—'],
-      ['Pet', s.pet.id ? `${petName(s.pet.id)} ${s.pet.level}` : '—'],
-      ['Class', s.dungeonClass.id && section.location === 'dungeon'
-        ? `${DUNGEON_CLASSES.find((c) => c.id === s.dungeonClass.id)?.name} ${s.dungeonClass.level}` : '—'],
-      ['Target', r.target || 'None (outside dungeons)'],
-    ];
     body.replaceChildren(
-      h('div', { class: 'grid wide' },
-        actionSelect('Category', PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id,
-          (v) => { sectionId = v; buildId = ''; render(); }, { searchable: false }),
-        actionSelect('Build', section.builds.map((b) => [b.id, b.name]), build.id,
-          (v) => { buildId = v; render(); }, { searchable: false }),
-        actionSelect('Stage', (section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage,
-          (v) => { stage = v; render(); }, { searchable: false })),
-      h('table', { class: 'kv preset-summary' }, rows.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v)))),
+      choices('Category', PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id, (v) => { sectionId = v; buildId = ''; render(); }),
+      choices('Build', section.builds.map((b) => [b.id, b.name]), build.id, (v) => { buildId = v; render(); }, 'builds'),
+      choices('Stage', (section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage, (v) => { stage = v; render(); }),
       r.missing.length ? h('p', { class: 'hint' }, `Not in the item list (left empty): ${r.missing.join(', ')}`) : '',
       h('label', { class: 'check modal-check' },
         h('input', { type: 'checkbox', checked: keepTarget, onchange: (e) => { keepTarget = e.target.checked; } }),
@@ -1383,7 +1370,7 @@ function openPresetModal() {
   render();
   confirmModal({
     title: 'Load a build preset',
-    message: `A typical player's gear at each stage of current progression (reviewed ${PRESETS_REVIEWED}). It replaces your gear, pet, accessories, shards and buffs.`,
+    message: 'Replaces your gear, pet, accessories, shards and buffs.',
     confirmLabel: 'Load preset',
     extra: body,
   }).then((ok) => {
@@ -1661,6 +1648,47 @@ function preloadEnemyPictures() {
   }
 }
 
+// Layouts of the simulation window, for testing (style.css, data-layout): buttons above the window
+// switch between them, and the pick is remembered in this browser.
+const SIM_LAYOUTS = [['', 'Original'], ['wide', 'Wide graph'], ['sidebar', 'Sidebar'], ['dashboard', 'Dashboard']];
+const SIM_LAYOUT_KEY = 'dpscalc.simLayout';
+function simLayoutButtons() {
+  let current = '';
+  try { current = localStorage.getItem(SIM_LAYOUT_KEY) || ''; } catch { /* private mode */ }
+  if (!SIM_LAYOUTS.some(([id]) => id === current)) current = '';
+  // A popover (top layer): the window's clip-path would cut it off otherwise; placeSimLayouts puts it above the window.
+  const bar = h('div', { class: 'sim-layouts', role: 'group', 'aria-label': 'Layout', popover: 'manual' });
+  const apply = (id) => {
+    current = id;
+    const dialog = bar.closest('dialog');
+    if (dialog) { if (id) dialog.dataset.layout = id; else delete dialog.dataset.layout; }
+    for (const b of bar.children) {
+      const on = b.dataset.id === id;
+      b.classList.toggle('primary', on);
+      b.setAttribute('aria-pressed', String(on));
+    }
+    try { localStorage.setItem(SIM_LAYOUT_KEY, id); } catch { /* private mode */ }
+  };
+  bar.append(...SIM_LAYOUTS.map(([id, label]) => h('button', { type: 'button', 'data-id': id, onclick: () => apply(id) }, label)));
+  // Once the bar is in the window, put the remembered layout on it.
+  queueMicrotask(() => apply(current));
+  return bar;
+}
+// Shows the layout bar just above the open window, and keeps it there when the browser resizes.
+function placeSimLayouts(dialog) {
+  const bar = dialog.querySelector('.sim-layouts');
+  if (!bar?.showPopover) return;
+  bar.showPopover();
+  const place = () => {
+    const r = dialog.getBoundingClientRect();
+    bar.style.top = `${Math.max(6, r.top - bar.offsetHeight - 10)}px`;
+  };
+  place();
+  dialog.addEventListener('animationend', place, { once: true }); // after the opening animation settles
+  addEventListener('resize', place);
+  dialog.addEventListener('close', () => removeEventListener('resize', place), { once: true });
+}
+
 function openSimScreen() {
   preloadEnemyPictures();
   const lines = simLoadLines();
@@ -1680,6 +1708,7 @@ function openSimScreen() {
     label.textContent = `${pct}% — ${lines[Math.floor(elapsed / SIM_LOAD_LINE_MS) % lines.length]}`;
   }, 30);
   const dialog = h('dialog', { class: 'modal glass sim-screen', 'aria-labelledby': 'sim-title' },
+    simLayoutButtons(),
     h('div', { class: 'sim-head' },
       h('h2', { id: 'sim-title' }, 'Simulation'),
       h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Close')),
@@ -1688,7 +1717,7 @@ function openSimScreen() {
     clearInterval(progress);
     if (dialog.open) renderSim(body, SIM_START_DELAY_MS);
   }, SIM_LOAD_MS);
-  dialog.addEventListener('close', () => { clearInterval(progress); stopSimPlayback(); dialog.remove(); });
+  dialog.addEventListener('close', () => { clearInterval(progress); stopSimPlayback(); ++simRunId; dialog.remove(); });
   // Clicking the backdrop closes it, as with the confirmation modal.
   dialog.addEventListener('click', (e) => {
     if (e.target !== dialog) return;
@@ -1697,6 +1726,7 @@ function openSimScreen() {
   });
   document.body.append(dialog);
   dialog.showModal();
+  placeSimLayouts(dialog);
 }
 
 // The fight plays back in real time (or 2× / 4×). Settings on top restart it; the action
@@ -1745,7 +1775,11 @@ function openSimSettings() {
       simNumber('Base ping (ms)', 'ping', 0, 2000, 1, 'Round trip; delays your clicks and reactions'),
       h('span'),
       instabilitySlider('Server instability', 'serverInstability', serverText),
-      instabilitySlider('Client instability', 'clientInstability', clientText)));
+      instabilitySlider('Client instability', 'clientInstability', clientText)),
+    h('h3', {}, 'Runs'),
+    h('p', { class: 'hint' }, 'Run the fight several times, each with its own luck (crits, Ferocity, lag, clicks), for the average and the outliers. The median run plays back.'),
+    h('div', { class: 'sim-settings-grid' },
+      simNumber('Simulations', 'runs', 1, SIM_MAX_RUNS, 1, '1 plays a single fight')));
   dialog.addEventListener('close', () => dialog.remove());
   dialog.addEventListener('click', (e) => {
     if (e.target !== dialog) return;
@@ -1759,23 +1793,73 @@ function openSimSettings() {
 // The simulated player (clock.js), fixed: no mistakes, at human speed. Even clicks per second, right
 // click spammed (or 'hold': every 4 ticks), and reaction time (ms).
 const SIM_PLAYER = { cps: 8, rightClick: 'spam', reactionMs: 160 };
+// The fight, fixed: until the enemy dies, both starting at full health.
+const SIM_FIGHT = { mode: 'kill', enemyHpPct: 100, playerHpPct: 100 };
 
 let simTimer = 0;
 const SIM_FLASH_MS = 100;
+// Several runs at once (Simulation settings › Simulations): at most this many; they run in slices of
+// about SIM_SLICE_MS so the page keeps responding, and simRunId cancels a batch that's been replaced.
+const SIM_MAX_RUNS = 500;
+const SIM_SLICE_MS = 30;
+let simRunId = 0;
+
+// Runs the fight count times from firstSeed (seed after seed), keeping each run's figures; onProgress(done).
+// Resolves to the runs, or null if another simulation started meanwhile.
+function runBatch(input, opts, firstSeed, count, onProgress) {
+  const id = ++simRunId;
+  const runs = [];
+  return new Promise((resolve) => {
+    const slice = () => {
+      if (id !== simRunId) return resolve(null);
+      const until = performance.now() + SIM_SLICE_MS;
+      while (runs.length < count && performance.now() < until) {
+        const seed = firstSeed + runs.length;
+        runs.push(runRecord(simulate(input, { ...opts, seed }), seed));
+      }
+      onProgress(runs.length);
+      if (runs.length < count) setTimeout(slice, 0);
+      else resolve(runs);
+    };
+    slice();
+  });
+}
 const stopSimPlayback = () => { clearInterval(simTimer); simTimer = 0; };
 
-function renderSim(body, startDelay = 0) {
+// batch: { runs, stats, seed, picked } when several runs were made: seed is the run played back (the median
+// unless another is picked on the results, which sets picked).
+function renderSim(body, startDelay = 0, batch = null) {
   stopSimPlayback();
   const o = state.sim;
   const restart = () => renderSim(body);
-  const set = (key, v) => { o[key] = v; saveState(); restart(); };
-  const num = (label, key, min, max) => h('label', { class: 'field' }, label,
-    h('input', { type: 'number', min, max, step: 1, value: o[key],
-      onchange: (e) => set(key, Math.min(max, Math.max(min, Number(e.target.value) || min))) }));
+  const count = Math.max(1, Math.min(SIM_MAX_RUNS, Math.floor(o.runs || 1)));
+  if (count > 1 && !batch) {
+    // Run them all first, with real progress, then play back the median.
+    const fill = h('i', { style: 'width:0%' });
+    const label = h('span', {}, `0 of ${count} simulations`);
+    body.replaceChildren(h('div', { class: 'sim-loader', role: 'status' },
+      h('div', { class: 'sim-spinner', 'aria-hidden': 'true' }, Array.from({ length: 8 }, (_, i) => h('i', { style: `--i:${i}` })))),
+    h('div', { class: 'sim-progress' }, label, h('div', { class: 'sim-progress-bar' }, fill)));
+    const input = buildInput();
+    const began = performance.now();
+    runBatch(input, { ...o, ...SIM_FIGHT, ...SIM_PLAYER }, simSeed, count, (done) => {
+      fill.style.width = `${Math.floor(done / count * 100)}%`;
+      // Time left, from the pace so far (once there's a pace to go by).
+      const spent = (performance.now() - began) / 1000;
+      const left = done ? Math.ceil(spent / done * (count - done)) : 0;
+      label.textContent = `${done} of ${count} simulations${spent > 1 && left > 1 ? ` · about ${left} s left` : ''}`;
+    }).then((runs) => {
+      if (!runs || !body.isConnected) return;
+      const stats = summarizeRuns(runs, SIM_FIGHT.mode);
+      renderSim(body, startDelay, { runs, stats, seed: stats.median });
+    });
+    return;
+  }
+  if (!batch) ++simRunId; // a single run replaces any batch still going
   const segmented = (name, options, value, onPick) => h('div', { class: 'segmented' }, options.map(([v, label]) =>
     h('label', {}, h('input', { type: 'radio', name, checked: value === v, onchange: () => onPick(v) }), label)));
 
-  const s = simulate(buildInput(), { ...o, ...SIM_PLAYER, seed: simSeed });
+  const s = simulate(buildInput(), { ...o, ...SIM_FIGHT, ...SIM_PLAYER, seed: batch ? batch.seed : simSeed });
   const events = s.error ? [] : s.events;
   let paused = false;
   const playBtn = h('button', { type: 'button', class: 'primary', onclick: () => {
@@ -1783,18 +1867,15 @@ function renderSim(body, startDelay = 0) {
     playBtn.textContent = paused ? 'Play' : 'Pause';
   } }, 'Pause');
 
+  // Once the fight has played out, the Results button takes the play / pause button's place.
+  const controls = h('div', { class: 'sim-controls' },
+    segmented('sim-speed', [[1, '1×'], [2, '2×'], [4, '4×']], o.speed, (v) => { o.speed = v; saveState(); }),
+    playBtn,
+    h('button', { type: 'button', onclick: () => { simSeed += count; restart(); } }, 'Restart'));
   const settings = h('div', { class: 'sim-settings' },
-    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Fight'),
-      segmented('sim-mode', [['duration', 'Fixed duration'], ['kill', 'Until enemy dies']], o.mode, (v) => set('mode', v))),
-    o.mode === 'duration' ? num('Duration (s)', 'duration', 1, 600) : '',
-    num('Enemy HP %', 'enemyHpPct', 1, 100),
-    num('Your HP %', 'playerHpPct', 1, 100),
     h('div', { class: 'chips' }, h('label', { title: 'Health and incoming damage are not simulated yet' },
       h('input', { type: 'checkbox', checked: o.godMode, onchange: (e) => { o.godMode = e.target.checked; saveState(); } }), 'God mode')),
-    h('div', { class: 'sim-controls' },
-      segmented('sim-speed', [[1, '1×'], [2, '2×'], [4, '4×']], o.speed, (v) => { o.speed = v; saveState(); }),
-      playBtn,
-      h('button', { type: 'button', onclick: () => { simSeed++; restart(); } }, 'Restart')));
+    controls);
 
   // Action indicator, like a switch's status lights: an LED and its label flash together.
   const flash = (el) => {
@@ -1819,9 +1900,14 @@ function renderSim(body, startDelay = 0) {
   const bonusNames = [...new Set(events.flatMap((e) => e.bonuses))];
   const procs = {
     ...(s.spellName ? { cast: proc(`${s.spellName} cast`) } : {}),
-    ...(s.fireTicks || s.fistTicks || s.auraTicks || s.eyeTicks ? { fire: proc([s.fireTicks && 'Fire Aspect burn', s.fistTicks && 'Flaming Fist burn',
-      s.auraTicks && 'Blazing Aura', s.eyeTicks && 'Eye Beam'].filter(Boolean).join(' / ')) } : {}),
-    hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
+    // Timed damage, a row each (by the event's src): Fire Aspect, Flaming Fist, Blazing Aura, Eye Beam.
+    ...(s.fireTicks ? { 'tick:fire': proc('Fire Aspect burn') } : {}),
+    ...(s.fistTicks ? { 'tick:fist': proc('Flaming Fist burn') } : {}),
+    ...(s.auraTicks ? { 'tick:aura': proc('Blazing Aura') } : {}),
+    ...(s.eyeTicks ? { 'tick:eye': proc('Eye Beam') } : {}),
+    hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'),
+    // Each bonus this fight procs (First Strike, Lightning, …) is a row of its own.
+    ...Object.fromEntries(bonusNames.map((n) => [`bonus:${n}`, proc(n)])),
   };
   // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
   const phases = s.phases || [];
@@ -1838,7 +1924,7 @@ function renderSim(body, startDelay = 0) {
     const label = h('span', {}, k);
     return { v, label, el: h('div', {}, v, label) };
   };
-  const time = readout(s.mode === 'kill' ? 'Time' : `Time (of ${fmt(s.seconds)} s)`);
+  const time = readout('Time');
   const dmg = readout('Damage');
   const dps = readout('Damage / s');
   const mana = readout('Mana');
@@ -1846,7 +1932,11 @@ function renderSim(body, startDelay = 0) {
   // The chosen enemy's name (the health bar says the rest), or whatever is being hit instead (a demon, a pup, the Brood).
   const enemyName = state.target.enemy || 'Enemy';
   // The middle: damage numbers off a target, and the damage graph (simGraphic.js).
-  const graphic = s.error ? null : createSimGraphic(s, { labels: PHASE_LABELS, name: enemyName, boss: !!state.target.boss });
+  // With several runs, the others' damage curves go faint behind this one's.
+  const others = batch ? batch.runs.filter((r) => r.seed !== batch.seed).map((r) => r.curve) : [];
+  // A run picked on the results screen is focused (green); the median played first isn't.
+  const graphic = s.error ? null : createSimGraphic(s, { labels: PHASE_LABELS, name: enemyName, boss: !!state.target.boss, others, focus: !!batch?.picked,
+    runPhases: batch ? batch.runs.map((r) => r.phases) : null });
   const hpRead = readout(enemyName);
   const hpBar = h('i', { style: 'width:100%' });
   if (s.maxHp) hpRead.el.append(h('span', { class: 'sim-hpbar' }, hpBar)); // a span: tile divs get tile styling
@@ -1867,6 +1957,9 @@ function renderSim(body, startDelay = 0) {
   let last = null;
   // The fight runs to its end (kill or duration), so phases after the last hit still play out.
   const fightEnd = s.killedAt ?? s.seconds;
+  // With several runs, playback goes on until the slowest has finished, so every run's line plays out;
+  // this run's figures stay at its end meanwhile.
+  const playEnd = batch ? Math.max(fightEnd, ...batch.runs.map((r) => r.killedAt ?? r.seconds)) : fightEnd;
   // Damage / s changes only when a hit lands (set in frame); the rest updates every frame.
   const show = () => {
     const end = i >= events.length && clock >= fightEnd;
@@ -1898,12 +1991,12 @@ function renderSim(body, startDelay = 0) {
       dps.v.textContent = e.t >= 1 ? fmt(total / e.t) : '—';
       // Ferocity strikes arrive as their own event a moment after the hit.
       if (e.ability) procs.cast.fire();
-      else if (e.fire) procs.fire.fire();
+      else if (e.fire) procs[`tick:${e.src || 'fire'}`]?.fire();
       else if (!e.feroOnly) procs.hit.fire();
       if (e.mana != null) mana.v.textContent = fmt(e.mana);
       if (e.ferocity) procs.ferocity.fire();
       if (e.swipe) procs.swipe.fire();
-      if (e.bonuses.length) procs.bonus.fire(e.bonuses);
+      for (const b of e.bonuses) procs[`bonus:${b}`]?.fire();
       graphic?.hit(e);
     }
     graphic?.tick(clock);
@@ -1913,16 +2006,16 @@ function renderSim(body, startDelay = 0) {
       if (now?.detail && detail.textContent !== now.detail) detail.textContent = now.detail;
     }
     show();
-    if (i >= events.length && clock >= fightEnd) {
+    if (i >= events.length && clock >= playEnd) {
       for (const { row } of phaseRows) row.classList.remove('on');
-      // The Results button (graph, top left) swaps the simulation for its results, and back.
-      graphic?.finish(() => {
-        const sim = [...body.childNodes];
-        body.replaceChildren(renderSimResults(s, () => body.replaceChildren(...sim)));
-      });
+      graphic?.finish();
       stopSimPlayback();
-      playBtn.disabled = true;
-      playBtn.textContent = s.killedAt !== null ? 'Killed' : s.despawned ? 'Failed' : 'Done';
+      // The Results button (in the play / pause button's place) swaps the simulation for its results, and back.
+      playBtn.replaceWith(h('button', { type: 'button', class: 'primary', onclick: () => {
+        const sim = [...body.childNodes];
+        body.replaceChildren(renderSimResults(s, () => body.replaceChildren(...sim),
+          batch && { ...batch, play: (seed) => renderSim(body, 0, { ...batch, seed, picked: true }) }));
+      } }, 'Results'));
     }
   };
   show();
@@ -1930,8 +2023,9 @@ function renderSim(body, startDelay = 0) {
 }
 
 // The results of a finished fight (simResults.js), in place of the simulation; back() returns to it.
-// A report: the outcome and headline figures on top, then columns of label / value rows.
-function renderSimResults(s, back) {
+// A report: the outcome and headline figures on top, then columns of label / value rows. batch (several
+// runs): { runs, stats, seed: the run shown, play(seed): plays another run }.
+function renderSimResults(s, back, batch = null) {
   const r = summarize(s);
   const secs = (t) => `${fmt(t, 2)} s`;
   const outcome = { killed: 'Killed', failed: 'Failed', alive: 'Alive' }[r.outcome];
@@ -1951,6 +2045,31 @@ function renderSimResults(s, back) {
         h('th', {}, statName(stat)), h('td', {}, statValue(stat, low)), h('td', {}, statValue(stat, high))))))
       : h('p', {}, 'No stat changed during the fight.'));
   const notYet = () => h('span', { class: 'sim-muted' }, 'Not simulated yet');
+  // Across the runs: the outcome counts, the time to kill (or damage) and damage / s spread, the outliers,
+  // and which run is shown, with the fastest / median / slowest to play instead.
+  const across = (() => {
+    if (!batch) return '';
+    const b = batch.stats;
+    const time = b.metric === 'time';
+    const val = (v) => (time ? secs(v) : fmt(v));
+    const m = b.main;
+    const which = batch.seed === b.best ? (time ? 'fastest' : 'most damage') : batch.seed === b.worst ? (time ? 'slowest' : 'least damage')
+      : batch.seed === b.median ? 'median' : '';
+    const runNo = batch.runs.findIndex((r) => r.seed === batch.seed) + 1;
+    const pick = (label, seed) => h('button', { type: 'button', class: 'ghost', disabled: seed === batch.seed, onclick: () => batch.play(seed) }, label);
+    const outlierNote = m.outliers.length ? m.outliers.slice(0, 6).map((x) => val(x.value)).join(', ') + (m.outliers.length > 6 ? ', …' : '') : '';
+    return h('section', { class: 'sim-report-block' }, h('h4', {}, `Across ${b.runs} simulations`),
+      h('dl', {}, [
+        ['Shown', `run ${runNo}${which ? ` · ${which}` : ''}`],
+        ['Killed', `${b.killed} of ${b.runs}`, [b.failed && `${b.failed} despawned`, b.alive && `${b.alive} still alive`].filter(Boolean).join(', ')],
+        [time ? 'Time to kill' : 'Damage', val(m.mean), `average; median ${val(m.median)}, spread ±${val(m.sd)}`],
+        [time ? 'Fastest / slowest' : 'Most / least', time ? `${val(m.min)} / ${val(m.max)}` : `${val(m.max)} / ${val(m.min)}`],
+        ['5–95% of runs', `${val(m.p5)} – ${val(m.p95)}`],
+        ['Outliers', fmt(m.outliers.length), outlierNote],
+        ['Damage / s', fmt(b.dps.mean), `average; ${fmt(b.dps.min)} – ${fmt(b.dps.max)}`],
+      ].filter(Boolean).map(([k, v, note]) => h('div', {}, h('dt', {}, k, note ? h('small', {}, note) : ''), h('dd', {}, v)))),
+      h('div', { class: 'sim-run-picks' }, pick(time ? 'Fastest' : 'Most damage', b.best), pick('Median', b.median), pick(time ? 'Slowest' : 'Least damage', b.worst)));
+  })();
 
   return h('div', { class: 'sim-report' },
     h('header', { class: 'sim-report-head' },
@@ -1968,6 +2087,7 @@ function renderSimResults(s, back) {
       h('button', { type: 'button', class: 'ghost', onclick: back }, 'Back to simulation')),
     h('div', { class: 'sim-report-cols' },
       h('div', {},
+        across,
         block(r.outcome === 'killed' ? 'Hits to kill' : 'Hits', [
           ...r.hitsByWeapon.map((x) => [x.name, `${fmt(x.count)} ${x.unit}`, x.note]),
           ['Weapon / item swaps', fmt(r.swaps)],

@@ -33,6 +33,7 @@
   --good-ink: #0b7a6e;
   --good-soft: rgba(18, 165, 148, .14);
   --good-line: #a3d8d4;
+  --run-focus: #1f9d4c; /* the played run among several on the damage graph */
   --warn: #c2620e;
   --on-accent: #ffffff;     /* text on accent / danger buttons */
   --field-focus: #ffffff;
@@ -90,6 +91,7 @@
   --good-ink: #4fe0cb;
   --good-soft: rgba(54, 209, 187, .14);
   --good-line: #2a6a70;
+  --run-focus: #4ade80;
   --warn: #f0a050;
   --field-focus: #1b1e25;
   --hover-border: #4f5092;
@@ -699,11 +701,14 @@ button.primary:hover { color: var(--on-accent); }
 .modal-check { margin: -6px 0 18px; font-size: 13px; }
 /* Build preset picker: three dropdowns and a summary of what loads. */
 .modal:has(.preset-pick) { width: min(600px, calc(100vw - 32px)); }
-.preset-pick .grid { margin-bottom: 14px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-.preset-summary { margin-bottom: 14px; font-size: 13px; }
-.preset-summary td:first-child { color: var(--muted); white-space: nowrap; padding-right: 12px; width: 1%; }
-.preset-summary td:not(:first-child) { text-align: left; white-space: normal; padding-left: 0; }
-.preset-pick .modal-check { margin: 0 0 18px; }
+/* Load preset: rows of buttons (category, build, stage), the picked one highlighted. */
+.preset-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.preset-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.preset-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-choices button { padding: 6px 12px; white-space: nowrap; }
+/* Builds in an even grid, so a long list reads in columns. */
+.preset-choices.builds { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.preset-pick .modal-check { margin: 4px 0 18px; }
 
 /* Simulate button in the damage panel, with a pixel play triangle drawn like the chevrons. */
 .sim-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 16px; }
@@ -812,8 +817,6 @@ button.primary:hover { color: var(--on-accent); }
 @media (prefers-reduced-motion: reduce) { .sim-pop { animation: sim-pop-still .9s steps(1) forwards; } @keyframes sim-pop-still { to { opacity: 0; } } }
 
 .sim-graph { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-/* Shown on the graph once the fight is over. */
-.sim-results-btn { position: absolute; top: 6px; left: 58px; z-index: 1; }
 
 /* Results screen: in place of the simulation, fitted to the window (no scrolling). A report on the
    window's own surface: hierarchy from type and thin rules, no boxed panels. */
@@ -840,6 +843,7 @@ button.primary:hover { color: var(--on-accent); }
 .sim-report-block dd { margin: 0; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
 .sim-report-block p { margin: 0; padding: 6px 0; font-size: 13px; color: var(--faint); }
 .sim-muted { color: var(--faint); }
+.sim-run-picks { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }
 .sim-stat-range { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 .sim-stat-range th, .sim-stat-range td { padding: 6px 0 6px 16px; text-align: right; border-bottom: 1px solid var(--line); }
 .sim-stat-range th:first-child { text-align: left; padding-left: 0; font-weight: 400; }
@@ -848,14 +852,26 @@ button.primary:hover { color: var(--on-accent); }
 .sim-graph-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; font-size: 12px; color: var(--muted); }
 .sim-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .sim-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-.sim-legend i { width: 10px; height: 10px; }
+/* Phase swatches, drawn like the bands below (same opacities, same background): solid, and striped
+   (/// like the chart's 8px pattern with 3.5px stripes) when several runs are shown. */
+.sim-legend .swatch { display: inline-flex; height: 10px; }
+.sim-legend .swatch b { display: block; width: 10px; height: 10px; }
+.sim-legend .swatch .solid { background: var(--c); opacity: var(--band-opacity); }
+.sim-legend .swatch .stripes { width: 12px; opacity: var(--band-edge-opacity);
+  background: repeating-linear-gradient(135deg, var(--c) 0 3.5px, transparent 3.5px 8px); }
 .sim-chart-wrap { position: relative; }
 .sim-chart { display: block; width: 100%; height: auto; overflow: visible; }
 .sim-chart .grid { stroke: var(--line); stroke-width: 1; }
 .sim-chart .axis { fill: var(--faint); font-size: 10px; font-family: inherit; }
 .sim-chart .damage { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.sim-chart .damage.other { stroke-width: 1.25; }
+.sim-chart .damage.focus { stroke: var(--run-focus); }
 .sim-chart .cursor { stroke: var(--text); stroke-width: 1; opacity: .5; }
-.sim-chart .band { opacity: .22; }
+/* Phase bands; the legend swatches use the same opacities so they match. */
+.sim-graph { --band-opacity: .22; --band-edge-opacity: .35; }
+.sim-chart .band { opacity: var(--band-opacity); }
+/* Where only some of several runs are in a phase: diagonal stripes in its color (simGraphic.js). */
+.sim-chart .band-edge { opacity: var(--band-edge-opacity); }
 .band-1 { fill: var(--phase-1); background: var(--phase-1); }
 .band-2 { fill: var(--phase-2); background: var(--phase-2); }
 .band-3 { fill: var(--phase-3); background: var(--phase-3); }
@@ -874,6 +890,50 @@ button.primary:hover { color: var(--on-accent); }
   .sim-main { grid-template-columns: minmax(0, 1fr); }
   .sim-status { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---------- Simulation window layouts (for testing) ----------
+   data-layout on the window picks one; without it, the original layout above. The buttons sit above the
+   window (outside its box, as a popover). Each layout flattens the window's parts into one grid: controls, lights
+   (action and phase indicators), target, graph and status (the tiles). The target scales to fit its cell
+   (a size container); the graph fills its cell, its plot taking the cell's shape (simGraphic.js). */
+/* A popover (the top layer), so the window's clip-path doesn't cut it off; main.js puts it above the window. */
+.sim-layouts { position: fixed; inset: auto; left: 50%; transform: translateX(-50%); margin: 0; padding: 0; border: 0; background: none; overflow: visible; color: inherit; }
+.sim-layouts:popover-open { display: flex; gap: 6px; }
+.sim-layouts button { padding: 6px 12px; white-space: nowrap; }
+.sim-screen[data-layout] .sim-body:has(> .sim-settings) { display: grid; gap: 14px 20px; }
+.sim-screen[data-layout] :is(.sim-main, .sim-stage, .sim-visual) { display: contents; }
+.sim-screen[data-layout] .sim-settings { grid-area: controls; }
+.sim-screen[data-layout] .sim-indicators { grid-area: lights; min-height: 0; overflow: hidden; }
+.sim-screen[data-layout] .sim-target { grid-area: target; min-height: 0; container-type: size; justify-content: center; padding-top: 34px; }
+.sim-screen[data-layout] .sim-dummy-wrap { max-width: none; width: min(100cqw, calc(100cqh - 8px)); }
+.sim-screen[data-layout] .sim-graph { grid-area: graph; min-height: 0; }
+.sim-screen[data-layout] .sim-chart-wrap { flex: 1; min-height: 0; }
+.sim-screen[data-layout] .sim-chart { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sim-screen[data-layout] .sim-status { grid-area: status; align-content: center; }
+/* Wide graph: the graph across the top, the lights, target and tiles in a row below. */
+.sim-screen[data-layout="wide"] .sim-body:has(> .sim-settings) {
+  grid-template: "controls controls controls" auto "graph graph graph" minmax(0, 1.5fr) "lights target status" minmax(0, 1fr) / 400px minmax(0, 1fr) 300px;
+}
+.sim-screen[data-layout="wide"] .sim-status { grid-template-columns: repeat(2, 1fr); }
+/* Sidebar: controls, tiles and lights down the left; the target, then the graph, on the right. */
+.sim-screen[data-layout="sidebar"] .sim-body:has(> .sim-settings) {
+  grid-template: "controls target" auto "status target" auto "lights target" minmax(0, 0.5fr) "lights graph" minmax(0, 1.6fr) / 280px minmax(0, 1fr);
+}
+.sim-screen[data-layout="sidebar"] .sim-controls { margin-left: 0; flex-wrap: wrap; }
+.sim-screen[data-layout="sidebar"] .sim-status { grid-template-columns: repeat(2, 1fr); }
+/* Dashboard: tiles across the top; the lights over the graph on the left, the target down the right. */
+.sim-screen[data-layout="dashboard"] .sim-body:has(> .sim-settings) {
+  grid-template: "controls controls" auto "status status" auto "lights target" auto "graph target" minmax(0, 1fr) / minmax(0, 2fr) minmax(0, 1fr);
+}
+.sim-screen[data-layout="dashboard"] .sim-status { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+/* Wide graph and Dashboard: the action and phase lights side by side. */
+.sim-screen:is([data-layout="wide"], [data-layout="dashboard"]) .sim-indicators { flex-direction: row; gap: 24px; }
+.sim-screen:is([data-layout="wide"], [data-layout="dashboard"]) .sim-indicators > * { flex: 1 1 0; min-width: 0; }
+/* Dashboard: compact lights (each list wraps into a new column after 4 rows), so the graph under them gets the height. */
+.sim-screen[data-layout="dashboard"] .sim-body:has(> .sim-settings) { row-gap: 10px; }
+.sim-screen[data-layout="dashboard"] .sim-indicators > * { flex: 0 1 auto; }
+.sim-screen[data-layout="dashboard"] .sim-procs { display: grid; grid-template-rows: repeat(4, auto); grid-auto-flow: column; gap: 4px 28px; padding-top: 0; }
+.sim-screen[data-layout="dashboard"] .sim-bonuses { margin-top: 1px; }
 
 /* Fake loading spinner: eight pixel squares in a ring, lit one after another (steps, not easing). */
 .sim-loader { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 18px; color: var(--muted); }

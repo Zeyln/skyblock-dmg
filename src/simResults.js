@@ -35,6 +35,78 @@ function swaps(s) {
     + 2 * phases.filter((p) => p.kind === 'web').length;
 }
 
+// ---------- Several runs ----------
+// The figures one run leaves for the batch (its events aren't kept), with its damage curve for the
+// graph: [t, damage so far] at most CURVE_POINTS steps along the fight, ending at its end.
+const CURVE_POINTS = 120;
+function damageCurve(s) {
+  const end = s.killedAt ?? s.seconds ?? 0;
+  const out = [[0, 0]];
+  const step = end / CURVE_POINTS || 1;
+  let next = step;
+  let last = 0;
+  let lastT = 0;
+  for (const e of s.events || []) {
+    // A point at the last event before each step (a point on the curve itself).
+    if (e.t > next && last !== out.at(-1)[1]) {
+      out.push([Math.min(lastT, end), last]);
+      next = e.t + step;
+    }
+    last = e.total;
+    lastT = e.t;
+  }
+  out.push([end, s.total || last]);
+  return out;
+}
+// phases: [kind, start, end] each, ended at the run's end at the latest (for the graph's bands).
+export const runRecord = (s, seed) => ({
+  seed, killedAt: s.killedAt, despawned: !!s.despawned, seconds: s.seconds, total: s.total, dps: s.dps, curve: damageCurve(s),
+  phases: (s.phases || []).map((p) => [p.kind, p.start, Math.min(p.end, s.killedAt ?? s.seconds)]),
+});
+
+// Linear-interpolated percentile (p in 0–100) of a sorted list.
+function percentile(sorted, p) {
+  if (!sorted.length) return null;
+  const x = (sorted.length - 1) * p / 100;
+  const lo = Math.floor(x);
+  return sorted[lo] + (sorted[Math.min(lo + 1, sorted.length - 1)] - sorted[lo]) * (x - lo);
+}
+
+// Average, median, spread (standard deviation), extremes, 5–95% range and outliers (outside 1.5 × the
+// interquartile range, Tukey's rule) of values, each { value, seed }.
+function spread(list) {
+  if (!list.length) return null;
+  const sorted = [...list].sort((a, b) => a.value - b.value);
+  const v = sorted.map((x) => x.value);
+  const mean = v.reduce((a, b) => a + b, 0) / v.length;
+  const sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / v.length);
+  const q1 = percentile(v, 25);
+  const q3 = percentile(v, 75);
+  const fence = 1.5 * (q3 - q1);
+  return {
+    count: v.length, mean, median: percentile(v, 50), sd, min: v[0], max: v.at(-1), p5: percentile(v, 5), p95: percentile(v, 95),
+    outliers: sorted.filter((x) => x.value < q1 - fence || x.value > q3 + fence),
+    lowSeed: sorted[0].seed, highSeed: sorted.at(-1).seed, medianSeed: sorted[Math.floor((sorted.length - 1) / 2)].seed,
+  };
+}
+
+// A batch of runs (runRecord each) in a fight mode: how many killed, failed (despawned) or ran out of
+// time, the time to kill over the kills (mode 'kill') or the damage dealt (fixed duration), and damage / s
+// over every run. best / median / worst: the seeds to play back (fastest kill or most damage first).
+export function summarizeRuns(runs, mode) {
+  const killed = runs.filter((r) => r.killedAt !== null);
+  const failed = runs.filter((r) => r.killedAt === null && r.despawned).length;
+  const byTime = mode === 'kill' && killed.length;
+  const main = byTime ? spread(killed.map((r) => ({ value: r.killedAt, seed: r.seed })))
+    : spread(runs.map((r) => ({ value: r.total, seed: r.seed })));
+  const dps = spread(runs.map((r) => ({ value: r.dps, seed: r.seed })));
+  return {
+    runs: runs.length, killed: killed.length, failed, alive: runs.length - killed.length - failed,
+    metric: byTime ? 'time' : 'damage', main, dps,
+    best: byTime ? main.lowSeed : main.highSeed, worst: byTime ? main.highSeed : main.lowSeed, median: main.medianSeed,
+  };
+}
+
 export function summarize(s) {
   const events = s.events || [];
   // Hits that did damage (not those on a Hitshield).
