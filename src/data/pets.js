@@ -4,7 +4,7 @@
 // Ability text comes from the NEU pet item lore, so ability rules match on that text and
 // read the {n} placeholder index from it (indices differ between rarities).
 
-import { RARITIES } from './mechanics.js';
+import { RARITIES, enemyLocation } from './mechanics.js';
 
 const PET_STAT_KEYS = {
   CRIT_DAMAGE: 'CRITICAL_DAMAGE',
@@ -79,6 +79,9 @@ const R = (pet, name, re, apply) => ({ pet, name, re, apply });
 const RAW = (pet, name, re, apply) => ({ ...R(pet, name, re, apply), raw: true });
 const N = '\\{(\\d+)\\}';
 const mob = (m) => (ctx) => ctx.target.mobs.includes(m);
+// Fought on the Crimson Isle: its mobs and bosses, and the Inferno Demonlord (spawned there); not Kuudra
+// (its own instance).
+const onCrimsonIsle = (name) => enemyLocation(name) === 'Crimson Isle';
 
 export const PET_RULES = [
   R('ENDER_DRAGON', 'End Strike', new RegExp(`Deal ${N}% more damage to [^.]*Ender mobs`),
@@ -94,6 +97,9 @@ export const PET_RULES = [
     ([v, max], ctx) => ({ statPct: { STRENGTH: Math.min(max, v * Math.floor((ctx.extras.magicFind || 0) / 5)) } })),
   R('GOLDEN_DRAGON', 'Shining Scales', /Grants \+11\.1 Strength and \+2\.2 Magic Find to your pet for each digit in your Gold Collection/,
     (_, ctx) => ({ petStats: { STRENGTH: 11.1 * Math.min(9, ctx.extras.goldDigits || 0) } })),
+
+  R('BLAZE', 'Nether Embodiment', new RegExp(`Increases Combat and Miscellaneous stats by ${N}% while on the Crimson Isle`),
+    ([v], ctx) => (onCrimsonIsle(ctx.target.enemy) ? { statPct: { __all: v } } : null)),
 
   R('LION', 'Primal Force', new RegExp(`Adds \\+${N}\\s*Damage and \\+${N}\\s*Strength to your weapons`),
     ([d, s]) => ({ stats: { DAMAGE: d, STRENGTH: s } })),

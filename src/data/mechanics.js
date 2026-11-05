@@ -290,7 +290,7 @@ export const ENEMIES = [
   enemy('Dwarven Mines', 'Glacite Bowman', ['Glacial', 'Humanoid'], 750000, { defense: 1000 }),
   enemy('Dwarven Mines', 'Glacite Mutt', ['Glacial', 'Animal'], 750000, { defense: 1000 }),
   enemy('Dwarven Mines', 'Glacite Mage', ['Glacial', 'Humanoid'], 825000, { defense: 1000 }),
-  enemy('Dwarven Mines', 'Ghost', ['Arcane', 'Subterranean'], 1000000),
+  enemy('Dwarven Mines', 'Ghost', ['Arcane', 'Subterranean'], 1000000, { families: ['Ghost'] }),
 
   // Crystal Hollows (its goblins are the Dwarven Mines ones; the Deep Caverns mobs spawn here too).
   // Left out: Kalhuiki Tribe Members/Elders (unkillable placeholder health), and Bal, Stoneworm and
@@ -363,6 +363,23 @@ export const ENEMIES = [
   enemy('Other', 'Minos Inquisitor', ['Mythological', 'Humanoid', 'Elusive'], 80000000),
 ];
 const BLOCKS_BY_ENEMY = new Map(ENEMIES.map((e) => [e.name, e.blocks]));
+
+// Where an enemy is fought (for items whose stats depend on the island): its group, except slayer bosses
+// and minibosses (the slayer's island), dungeons ('Catacombs'), Kuudra (its own instance, 'Kuudra') and the
+// Minos Inquisitor (the Hub, during Diana's Mythological Ritual). '' when there's no target.
+const SLAYER_ISLANDS = [[/^(Revenant|Atoned)/, 'Hub'], [/^(Tarantula|Conjoined|Primordial)/, "Spider's Den"], [/^Sven/, 'Hub'],
+  [/^(Voidgloom|Voidling|Voidcrazed)/, 'The End'], [/^Inferno Demonlord/, 'Crimson Isle']];
+const GROUP_BY_ENEMY = new Map(ENEMIES.map((e) => [e.name, e.group]));
+export function enemyLocation(name = '') {
+  const group = GROUP_BY_ENEMY.get(name);
+  if (!group) return '';
+  if (/^Kuudra/.test(name)) return 'Kuudra';
+  if (group.startsWith('Slayer')) return SLAYER_ISLANDS.find(([re]) => re.test(name))?.[1] || '';
+  if (group.startsWith('Dungeon')) return 'Catacombs';
+  if (name === 'Minos Inquisitor') return 'Hub';
+  return group;
+}
+export const MINING_ISLANDS = ['Deep Caverns', 'Dwarven Mines', 'Crystal Hollows'];
 // The mechanic blocks of an enemy (by name): [] for one with no special mechanics.
 export const enemyBlocks = (name) => BLOCKS_BY_ENEMY.get(name) || [];
 
@@ -495,7 +512,7 @@ export const HABANERO_WEAPONS = [
 // From the wiki's Damage Calculation tables. Rules match a mob type (mobs) or a creature
 // family (families) that isn't an official mob type: the katanas only hit Endermen harder,
 // not every Ender mob (e.g. dragons).
-export const TARGET_FAMILIES = ['Enderman', 'Wolf', 'Sea creature', 'Dragon'];
+export const TARGET_FAMILIES = ['Enderman', 'Wolf', 'Sea creature', 'Dragon', 'Ghost'];
 
 const vs = (mobs, mult) => ({ mobs, mult });
 const vsFamily = (families, mult) => ({ families, mult });
@@ -514,6 +531,7 @@ export const WEAPON_MULTIPLIERS = {
   // Unconditional (Sulphur Bow assumes Sulphur in the inventory or quiver)
   SAVANA_BOW: [always(2, 'all damage')],
   SULPHUR_BOW: [always(2, 'with Sulphur')],
+  MAGMA_BOW: [always(2, 'with Magma Cream')],
   PRISMARINE_BLADE: [inWater(3)],
   // Not added: Shaman Sword (the wiki lists its +100% vs wolves as ×1 since Aug 2026, a possible bug),
   // Daedalus Blade (no published value per Mythological Bestiary tier).
@@ -537,14 +555,16 @@ export const WEAPON_MULTIPLIERS = {
   UNDEAD_BOW: [vs(['Undead'], 2)],
   SUPER_UNDEAD_BOW: [vs(['Undead'], 2)],
   DEATH_BOW: [vs(['Undead'], 2)],
-  // 1 + 2% per 1% of the target's missing health
-  SPIRIT_SWORD: [{ mobs: ['Undead'], perMissingHp: 2 }],
-  ITEM_SPIRIT_BOW: [{ mobs: ['Undead'], perMissingHp: 2 }],
-  // Infernal daggers (also Wither / Skeletal)
-  FIREDUST_DAGGER: [vs(['Infernal'], 1.25), vs(['Wither'], 1.1)],
+  // 1 + k% per 1% of missing health: your own (ofPlayer, as the lore says) or the target's
+  SPIRIT_SWORD: [{ mobs: ['Undead'], perMissingHp: 2, ofPlayer: true }],
+  ITEM_SPIRIT_BOW: [{ mobs: ['Undead'], perMissingHp: 2, ofPlayer: true }],
+  BONE_REAVER: [{ mobs: ['Undead'], perMissingHp: 1, ofPlayer: true }],
+  FELTHORN_REAPER: [{ always: true, perMissingHp: 1, label: "per 1% of the target's missing health" }],
+  // Infernal daggers (also Wither / Skeletal); Firedust and Mawdust as their NEU lore (Nov 2026), not the wiki's 1.25
+  FIREDUST_DAGGER: [vs(['Infernal'], 1.2), vs(['Wither'], 1.1)],
   BURSTFIRE_DAGGER: [vs(['Infernal'], 1.5), vs(['Wither'], 1.2)],
   HEARTFIRE_DAGGER: [vs(['Infernal'], 2), vs(['Wither'], 1.5)],
-  MAWDUST_DAGGER: [vs(['Infernal'], 1.5), vs(['Skeletal'], 1.25)],
+  MAWDUST_DAGGER: [vs(['Infernal'], 1.5), vs(['Skeletal'], 1.2)],
   BURSTMAW_DAGGER: [vs(['Infernal'], 2.5), vs(['Skeletal'], 1.5)],
   HEARTMAW_DAGGER: [vs(['Infernal'], 3.5), vs(['Skeletal'], 2)],
   // Wither
@@ -559,6 +579,12 @@ export const WEAPON_MULTIPLIERS = {
   FLAMING_FLAY: [vsFamily(['Sea creature'], 3)],
   POOCH_SWORD: [vsFamily(['Wolf'], 2)],
   SWORD_OF_REVELATIONS: [vs(['Mythological'], 1.5)],
+  // From NEU item lore (Nov 2026): the Slime Bow with Slimeballs in the inventory; Spooky mobs only
+  // appear during the Spooky Festival.
+  DRAGON_SHORTBOW: [vsFamily(['Dragon'], 1.15)],
+  SLIME_BOW: [vs(['Cubic'], 5)],
+  GHOUL_BUSTER: [vs(['Spooky'], 2)],
+  POLTERGEIST_PITCHFORK: [vsFamily(['Ghost'], 3)],
 };
 
 // Fragged (STARRED_*) versions share their base weapon's bonus.
@@ -634,6 +660,31 @@ export const PRICE_ITEMS = {
   MIDAS_SWORD: { brackets: GREED_BRACKETS, cap: 50e6, maxBonus: 120 },
   STARRED_MIDAS_SWORD: { brackets: GREED_BRACKETS_UPGRADED, cap: 250e6, maxBonus: 225 },
 };
+
+// Weapons whose stats grow with a count the player enters on the weapon (NEU item lore, Nov 2026),
+// stored as piece.counters[key]; unset counts as def (the most that counts, as for David's Cloak, except
+// Fear, which has no stated maximum). stats(values) -> stats added to the weapon (stars don't scale them).
+const perStep = (n, per, max) => Math.min(max, Math.floor(Math.max(0, n || 0) / per));
+export const COUNTER_ITEMS = {
+  POOCH_SWORD: { inputs: [{ key: 'wolfSlayer', label: 'Wolf Slayer level', max: 9, def: 9 }], stats: (v) => ({ DAMAGE: 20 * v.wolfSlayer }) },
+  SHAMAN_SWORD: { inputs: [{ key: 'wolfSlayer', label: 'Wolf Slayer level', max: 9, def: 9 }], stats: (v) => ({ DAMAGE: 10 * v.wolfSlayer }) },
+  TACTICIAN_SWORD: { inputs: [{ key: 'collections', label: 'Combat collections at VII+', max: 11, def: 11 }], stats: (v) => ({ DAMAGE: 15 * v.collections }) },
+  RAIDER_AXE: {
+    inputs: [{ key: 'kills', label: 'Kills', max: 17500, def: 17500 }, { key: 'wood', label: 'Wood collections (summed)', max: 50000, def: 50000 }],
+    stats: (v) => ({ DAMAGE: perStep(v.kills, 500, 35), STRENGTH: perStep(v.wood, 500, 100) }),
+  },
+  FEL_SWORD: { inputs: [{ key: 'kills', label: 'Kills', max: 10000, def: 10000 }], stats: (v) => ({ DAMAGE: perStep(v.kills, 100, 100) }) },
+  // +2.5 × purse^(1/4) Damage, capped at 2B coins, rounded to the nearest whole number on hit (wiki, Emerald Blade, Nov 2026).
+  EMERALD_BLADE: {
+    inputs: [{ key: 'purse', label: 'Coins in purse', max: 2e9, def: 2e9, step: 1e6 }],
+    stats: (v) => ({ DAMAGE: Math.round(2.5 * Math.pow(Math.min(2e9, Math.max(0, v.purse || 0)), 0.25)) }),
+  },
+  GREAT_SPOOK_SWORD: { inputs: [{ key: 'fear', label: 'Fear', max: 1000, def: 0 }], stats: (v) => ({ DAMAGE: v.fear, STRENGTH: v.fear }) },
+};
+// A counter weapon's values (piece.counters, defaults filled in, clamped).
+export function counterValues(def, piece) {
+  return Object.fromEntries(def.inputs.map((i) => [i.key, Math.max(0, Math.min(i.max, piece?.counters?.[i.key] ?? i.def))]));
+}
 
 export function greedBonus(itemId, price) {
   const def = PRICE_ITEMS[itemId];

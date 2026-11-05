@@ -780,6 +780,52 @@ describe('waiting on mana', () => {
   });
 });
 
+describe('item effects in the simulation', () => {
+  const gear = (id, category) => ({ item: { id, name: id, category, tier: 'EPIC', stats: {} } });
+  it('Flaming Fist: 10,000 per melee hit, 1,000 a tick over 10 ticks; fists overlap', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { equipment: [gear('FLAMING_FIST', 'GLOVES')] }), { duration: 10 });
+    expect(s.damage.fist).toBeGreaterThan((s.hits - 1) * 10000); // the last fist may outlast the fight
+    expect(s.damage.fist).toBeLessThanOrEqual(s.hits * 10000);
+    // 100 attack speed: a hit every 5 ticks, so two fists burn at once.
+    const fast = simulate(noCrit({ item: sword({ DAMAGE: 95, ATTACK_SPEED: 100 }) }, { equipment: [gear('FLAMING_FIST', 'GLOVES')] }), { duration: 10 });
+    expect(fast.events.some((e) => e.src === 'fist' && e.fire === 2000)).toBe(true);
+  });
+  it('Rekindle is bugged in the game (wiki), so Rekindled Ember Armor adds nothing to burns', () => {
+    const armor = ['HELMET', 'CHESTPLATE'].map((p) => gear(`REKINDLED_EMBER_${p}`, p));
+    const eq = [gear('FLAMING_FIST', 'GLOVES')];
+    const a = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { armor, equipment: eq }), { duration: 10 });
+    const b = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { equipment: eq }), { duration: 10 });
+    expect(a.damage.fist).toBe(b.damage.fist);
+  });
+  it('Blazing Aura: its capped tick every second', () => {
+    const armor = ['HELMET', 'CHESTPLATE', 'LEGGINGS', 'BOOTS'].map((p) => gear(`BLAZE_${p}`, p));
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { armor, target: { maxHp: 1e9 }, setInputs: { blaze_armor: { rods: 10000 } } }), { duration: 10 });
+    expect(s.auraTicks).toBe(9); // at 1–9 s
+    expect(s.damage.aura).toBe(9 * 700); // 500 + 2 × 100
+  });
+  it('Static Charge: the first hit takes both charges, then one every 30 s', () => {
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { equipment: [gear('THUNDERBOLT_NECKLACE', 'NECKLACE')] }), { duration: 65 });
+    expect(s.discharges).toBe(3);
+    expect(s.damage.hits).toBe(s.hits * 100 + 30 + 15 + 15);
+  });
+});
+
+describe('abilities on charges and the Eye Beam', () => {
+  it('Reaving Strike: 5 charges, one back every 4 s', () => {
+    const felthorn = { item: sword({ DAMAGE: 100 }, { id: 'FELTHORN_REAPER' }), attack: 'right' };
+    const s = simulate(noCrit(felthorn), { duration: 10 });
+    expect(s.casts).toBe(7); // 5 at the start, then at 4 s and 8 s
+    expect(s.hits).toBe(0);
+  });
+  it('Eye Beam: from the start, +100% a second for 5 s, using mana', () => {
+    const helm = { item: { id: 'PRECURSOR_EYE', name: 'Precursor Eye', category: 'HELMET', tier: 'LEGENDARY', stats: { INTELLIGENCE: 5000 } } };
+    const s = simulate(noCrit({ item: sword({ DAMAGE: 95 }) }, { armor: [helm] }), { duration: 8 });
+    const ticks = s.events.filter((e) => e.src === 'eye').map((e) => e.fire);
+    expect(ticks.slice(0, 7)).toEqual([4000, 8000, 12000, 16000, 20000, 24000, 24000]);
+    expect(s.lowestMana).toBeLessThan(5100); // the laser uses mana
+  });
+});
+
 describe('Fire Aspect', () => {
   it('burns for % of the igniting hit each second, raised by a stronger hit', () => {
     // 100 a hit, the first 200 (First Strike IV): the burn keeps the stronger 200, 9% = 18 a second.

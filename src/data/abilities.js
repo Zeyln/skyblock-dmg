@@ -10,11 +10,19 @@
 //   greed: base damage from the Dark Auction price, { min, bonus, cap } (Midas Staff)
 //   fixedCooldown: the cooldown isn't shortened (Wither Impact's 3-tick anti-autoclick limit)
 //   manaStep, manaReset (s): each cast costs manaStep more than the last, until manaReset passes without one
+//   explosion: the damage is an explosion (Implosion Belt)
+//   meleeHit: { pct, count, abilityEnchants?, perMissing10? }: not Magic Damage but count hits of pct% of the
+//     melee hit (crits, Strength and Crit Damage; no Ferocity). abilityEnchants: the enchants that don't affect
+//     abilities (Sharpness, First Strike, Triple-Strike) don't count; perMissing10: % more per 10% of your
+//     health missing
+//   charges: { max, every (s) }: casts held, one coming back every so often (instead of a cooldown)
+//   healthCost: Health a cast costs (not modelled: until damage taken exists it can always be paid)
+//   fixedBase: the base damage is the ability's own; noAbilityDamage: Ability Damage doesn't apply
 
 const ability = (name, base, scaling, mana, cooldown = 0, extra = {}) => ({ name, base, scaling, mana, cooldown, ...extra });
 
-const WITHER_IMPACT = ability('Wither Impact', 10000, 0.3, 300, 0.15, { fixedCooldown: true });
-const IMPLOSION = ability('Implosion', 10000, 0.3, 300, 10);
+const WITHER_IMPACT = ability('Wither Impact', 10000, 0.3, 300, 0.15, { fixedCooldown: true, explosion: true });
+const IMPLOSION = ability('Implosion', 10000, 0.3, 300, 10, { explosion: true });
 // Necron's Blade variants: the scrolls applied (all three replace them with Wither Impact).
 export const WITHER_BLADES = ['NECRON_BLADE', 'HYPERION', 'VALKYRIE', 'ASTRAEA', 'SCYLLA'];
 export const WITHER_SCROLLS = [
@@ -22,13 +30,23 @@ export const WITHER_SCROLLS = [
 ];
 
 const GIANTS_SLAM = ability("Giant's Slam", 100000, 0.05, 100, 30, { melee: true });
-const SPIRIT = (base) => ability('Guided Bat', base, 0.2, 200);
+const SPIRIT = (base) => ability('Guided Bat', base, 0.2, 200, 0, { explosion: true });
 const YETI = (base) => ability('Terrain Toss', base, 0.3, 250, 1);
-const BONZO = (base) => ability('Showtime', base, 0.2, 90);
+const BONZO = (base) => ability('Showtime', base, 0.2, 90, 0, { explosion: true });
 const ICE_BOLT = (base, mana) => ability('Ice Bolt', base, 0.3, mana);
 const ICE_SPRAY = (base) => ability('Ice Spray', base, 0.1, 50, 5);
 const MOLTEN_WAVE = (bonus, cap) => ability('Molten Wave', 6000, 0.3, 500, 1, { greed: { min: 6000, bonus, cap } });
 const DREADLORD = ability('Dreadlord', 500, 0.3, 40);
+// Reaving Strike (wiki, Nov 2026): 125% / 135% of the melee hit, on charges.
+const REAVING = (pct, max, every) => ability('Reaving Strike', 0, 0, 0, 0, { meleeHit: { pct, count: 1 }, charges: { max, every } });
+// Roses (wiki, Flower of Truth / Bouquet of Lies, Nov 2026): the melee damage formula, without Ferocity or
+// the enchants that don't affect abilities. Against one target each rose hits once (no bounces).
+const ROSES = (name, count, healthCost, perMissing10 = 0) => ability(name, 0, 0, 0, 1,
+  { meleeHit: { pct: 100, count, abilityEnchants: true, perMissing10 }, healthCost });
+// Precursor Eye's Eye Beam (wiki, Nov 2026): 4,000 a second, +100% each second for 5 s; 40 mana a second,
+// +25% each second; Intelligence and Ability Damage don't apply, enchants that affect abilities do. The
+// simulation fires it while the helmet is worn.
+export const EYE_BEAM = ability('Eye Beam', 4000, 0, 40, 0, { fixedBase: true, noAbilityDamage: true, ramp: { pct: 100, costPct: 25, seconds: 5 } });
 
 export const ABILITIES = {
   GIANTS_SWORD: GIANTS_SLAM,
@@ -49,7 +67,14 @@ export const ABILITIES = {
   STARRED_ICE_SPRAY_WAND: ICE_SPRAY(19000),
   FIRE_FURY_STAFF: ability('Firestorm', 42000, 0.3, 1000, 20, { over: 10 }),
   FIRE_VEIL_WAND: ability('Fire Veil', 15000, 0.3, 300, 1, { over: 5, perSecond: true }),
-  STAFF_OF_THE_VOLCANO: ability('Explode', 24000, 0.3, 100, 30),
+  STAFF_OF_THE_VOLCANO: ability('Explode', 24000, 0.3, 100, 30, { explosion: true }),
+  // Starfall (wiki, Nov 2026): 300 a second for 5 s, 0.3 Intelligence scaling.
+  STARLIGHT_WAND: ability('Starfall', 300, 0.3, 100, 2, { over: 5, perSecond: true }),
+  BONE_REAVER: REAVING(125, 4, 5),
+  FELTHORN_REAPER: REAVING(135, 5, 4),
+  STARRED_FELTHORN_REAPER: REAVING(135, 5, 4),
+  FLOWER_OF_TRUTH: ROSES('Heat-Seeking Rose', 1, 100),
+  BOUQUET_OF_LIES: ROSES('Petal Barrage', 3, 250, 2),
   PIGMAN_SWORD: ability('Burning Souls', 30000, 0.1, 400, 5, { over: 5, noAdditive: true }),
   RUNIC_STAFF: ability('Runic Zap', 10000, 0.2, 10, 1),
   CRYPT_DREADLORD_SWORD: DREADLORD,

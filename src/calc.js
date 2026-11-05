@@ -1,7 +1,7 @@
 import {
   BASE_PLAYER_STATS, ENCHANTS, weaponMultipliers, SWORD_REFORGES, BOW_REFORGES, ARMOR_REFORGES, REFORGE_EXTRAS,
   RARITIES, GEMS, gemValue, PROGRESSION_ITEMS, starMultiplier,
-  POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
+  POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus, COUNTER_ITEMS, counterValues,
   ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, WEAPON_ABILITIES, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
   LUST_FOR_BLOOD_PER_LEVEL, lustForBloodCap, EXTRA_INFLICTION, TWILIGHT_POISON_MULT, SKYBLOCK_LEVEL_STATS,
@@ -12,9 +12,10 @@ import {
 import { REFORGE_STONES } from './data/reforgeStones.js';
 import { applyPet } from './data/pets.js';
 import { detectSets, evaluateSets } from './data/sets.js';
-import { weaponAbility, greedBase, NOT_ON_ABILITIES, mageStats, mageBeamMult, mageCooldownPct, BASE_MANA, MANA_REGEN_PCT,
+import { weaponAbility, EYE_BEAM, greedBase, NOT_ON_ABILITIES, mageStats, mageBeamMult, mageCooldownPct, BASE_MANA, MANA_REGEN_PCT,
   DEPLOYABLES, MANA_POTION_MAX } from './data/abilities.js';
-import { enemyBlocks } from './data/mechanics.js';
+import { enemyBlocks, enemyLocation } from './data/mechanics.js';
+import { itemEffectsFor, REKINDLE_PCT, REKINDLE_WORKS, rekindlePieces } from './data/itemEffects.js';
 import { magicResistPct, bowImmune } from './bossMechanics.js';
 
 export const DAMAGE_STATS = ['DAMAGE', 'STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE'];
@@ -110,7 +111,8 @@ function reforgeStats(ref, rarityIdx) {
 }
 
 // Every stat source contributed by one weapon/armor/equipment piece.
-function pieceSources(piece, kind, input, statPct) {
+// fx: the context for item effects (data/itemEffects.js) that multiply the piece's own stats.
+function pieceSources(piece, kind, input, statPct, fx) {
   const item = piece.item;
   const out = [];
   const drop = isDungeonDrop(item, statTierCount(item));
@@ -134,6 +136,13 @@ function pieceSources(piece, kind, input, statPct) {
   for (const [k, v] of Object.entries(unstarred)) {
     base[k] = v * (k === 'CRITICAL_CHANCE' ? qualityMult * (1 + starBonus) : scale);
   }
+  const pieceFx = [];
+  for (const e of itemEffectsFor(item.id, kind)) {
+    const m = e.piece?.(fx);
+    if (!m) continue;
+    for (const k of Object.keys(base)) if (!m.stats || m.stats.includes(k)) base[k] *= m.mult;
+    pieceFx.push(`${e.name}: ${m.text}`);
+  }
   const prog = PROGRESSION_ITEMS[item.id];
   const tags = [
     dungeonItem !== item ? 'dungeonized' : '',
@@ -144,6 +153,7 @@ function pieceSources(piece, kind, input, statPct) {
     piece.stars ? `${piece.stars}✪` : '',
     cataBonus ? `Cata +${catacombsBoost(input.catacombsLevel)}%` : '',
     scale !== 1 ? `×${+scale.toFixed(3)}` : '',
+    ...pieceFx,
   ].filter(Boolean);
   out.push({ label: `${kind === 'weapon' ? 'Weapon: ' : ''}${item.name}${tags.length ? ` (${tags.join(', ')})` : ''}`, stats: base });
 
@@ -179,6 +189,11 @@ function pieceSources(piece, kind, input, statPct) {
     }
   }
   if (kind === 'weapon' && piece.artOfWar) out.push({ label: '↳ The Art of War', stats: { ...ART_OF_WAR } });
+  const counter = kind === 'weapon' && COUNTER_ITEMS[item.id];
+  if (counter) {
+    const v = counterValues(counter, piece);
+    out.push({ label: `↳ ${counter.inputs.map((i) => `${i.label} ${v[i.key].toLocaleString('en-US')}`).join(', ')}`, stats: counter.stats(v) });
+  }
   return out;
 }
 
@@ -200,18 +215,30 @@ export function calculate(input) {
   const weapon = input.weapon || {};
   // damageType 'magic': the weapon's right-click ability (data/abilities.js) instead of its hit: Magic
   // Damage, which doesn't crit, and which melee- and bow-only bonuses don't affect.
-  const spell = input.damageType === 'magic' ? weaponAbility(weapon) : null;
-  const magic = !!spell;
+  // damageType 'eyebeam': the Precursor Eye's laser. An ability that's a share of the melee hit (meleeHit:
+  // Reaving Strike, roses) isn't Magic Damage: it's worked out as a melee hit.
+  const spell = input.damageType === 'eyebeam' ? EYE_BEAM : input.damageType === 'magic' ? weaponAbility(weapon) : null;
+  const meleeAbility = spell?.meleeHit || null;
+  const magic = !!spell && !meleeAbility;
+  // Your own health, % (the simulation's Your HP %): for bonuses by your missing health.
+  const playerHpPct = Math.min(100, Math.max(0, input.player?.hpPct ?? 100));
   const bow = isBow(weapon.item) && !magic;
   const sources = []; // { label, stats } for the stat breakdown
   const additive = []; // { label, value }
   const multiplicative = []; // { label, value }
   const statPct = {};
+  // Context for item effects (data/itemEffects.js).
+  const fx = {
+    location: enemyLocation(target.enemy), target, night: input.accessoryInputs?.time === 'night',
+    inDungeon: input.dungeonMode === 'catacombs' || input.dungeonMode === 'master', cataLevel: clampCatacombs(input.catacombsLevel),
+    classId: input.dungeonClass?.id || '', weaponId: weapon.item?.id, bow, magic,
+    armorIds: (input.armor || []).map((p) => (p?.item?.id || '').replace(/^STARRED_/, '')).filter(Boolean),
+  };
 
   // --- Stats ---
   sources.push({ label: 'Base player stats', stats: { ...BASE_PLAYER_STATS } });
 
-  const weaponSources = weapon.item ? pieceSources(weapon, 'weapon', input, statPct) : [];
+  const weaponSources = weapon.item ? pieceSources(weapon, 'weapon', input, statPct, fx) : [];
   sources.push(...weaponSources);
   // Weapon ability kept active through the fight (Soulcry), unless switched off.
   const ability = WEAPON_ABILITIES[weapon.item?.id];
@@ -223,7 +250,7 @@ export function calculate(input) {
   for (const [kind, list] of [['armor', input.armor], ['equipment', input.equipment]]) {
     for (const p of list || []) {
       if (!p?.item) continue;
-      const ps = pieceSources(p, kind, input, statPct);
+      const ps = pieceSources(p, kind, input, statPct, fx);
       pieceBase.set(p.item.id, ps[0].stats);
       sources.push(...ps);
     }
@@ -324,9 +351,10 @@ export function calculate(input) {
     if (ench.stat) { sources.push({ label, stats: { [ench.stat]: v } }); continue; }
     if (ench.sim === 'lightning') { lightningPct = v; continue; } // every 3rd hit, simulation only
     if (ench.sim === 'fire') { if (!magic) fire = { pct: v, seconds: ench.seconds[Math.min(lvl, ench.seconds.length) - 1], label }; continue; }
-    if (ench.overload) { overloadPct = v; continue; } // applied to crits below
+    // Overload: +1% Crit Chance and Crit Damage per level (5% at V, NEU lore); Mega Crits below.
+    if (ench.overload) { overloadPct = v; sources.push({ label, stats: { CRITICAL_CHANCE: lvl, CRITICAL_DAMAGE: lvl } }); continue; }
     if (ench.manaSteal) { manaSteal = v; continue; } // mana on hit, the simulation's
-    if (magic && NOT_ON_ABILITIES.includes(ench.id)) continue;
+    if ((magic || meleeAbility?.abilityEnchants) && NOT_ON_ABILITIES.includes(ench.id)) continue;
     if (!hitsMob(ench.mobs, target)) continue;
     // The simulation passes the hit's number; a single hit uses the First hit(s) setting.
     if (ench.firstHit && !(hitNumber ? hitNumber === 1 : player.firstHit)) continue;
@@ -455,6 +483,35 @@ export function calculate(input) {
   const combat = combatWarriorBonus(input.combatLevel);
   if (combat) additive.push({ label: `Combat ${input.combatLevel} (Warrior)`, value: combat });
 
+  // Item abilities from their lore (data/itemEffects.js): stats, multipliers, Sting's crits.
+  let alwaysCrit = false;
+  // Rekindle: by the Rekindled Ember pieces worn (bugged in the game, so it adds nothing while REKINDLE_WORKS is off).
+  const rekindleN = Math.min(4, rekindlePieces(fx.armorIds));
+  const rekindlePct = REKINDLE_PCT[rekindleN] || 0;
+  if (rekindlePct) notes.push(REKINDLE_WORKS ? `Rekindle (${rekindleN} pieces): +${rekindlePct}% burning damage.`
+    : `Rekindle (${rekindleN} pieces) would give +${rekindlePct}% burning damage, but it's bugged and does nothing in the game (wiki); not counted.`);
+  let burnPct = REKINDLE_WORKS ? rekindlePct : 0;
+  let flamingFist = false;
+  let staticCharge = false;
+  let shred = null;
+  for (const [kind, list] of [['weapon', [weapon]], ['armor', input.armor], ['equipment', input.equipment]]) {
+    for (const p of list || []) {
+      if (!p?.item) continue;
+      for (const e of itemEffectsFor(p.item.id, kind)) {
+        const r = e.effect?.(fx);
+        if (!r) continue;
+        const label = `${p.item.name}: ${e.name} (${r.text})`;
+        if (r.stats) sources.push({ label, stats: { ...r.stats } });
+        if (r.multiplier) multiplicative.push({ label, value: r.multiplier });
+        if (r.alwaysCrit) { alwaysCrit = true; notes.push(`${p.item.name} always crits.`); }
+        if (r.burnPct) burnPct += r.burnPct;
+        if (r.flamingFist) flamingFist = true;
+        if (r.staticCharge) staticCharge = true;
+        if (r.shred) shred = r.shred;
+      }
+    }
+  }
+
   // Armor / equipment set bonuses and piece bonuses (data/sets.js)
   const detected = detectSets([
     ...(input.armor || []).map((p) => ({ slot: 'armor', id: p?.item?.id })),
@@ -463,7 +520,7 @@ export function calculate(input) {
   // Speed so far (base 100 plus gear, pet, reforges…), for the Warden Helmet.
   const speed = 100 + sources.reduce((a, src) => a + (src.stats.WALK_SPEED || 0), 0);
   const sets = evaluateSets(detected, {
-    bow, magic, inWater: !!player.inWater, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
+    bow, magic, explosion: !!spell?.explosion, inWater: !!player.inWater, target, weaponId: weapon.item?.id, cataLevel: clampCatacombs(input.catacombsLevel), speed,
     inDungeon: input.dungeonMode === 'catacombs' || input.dungeonMode === 'master',
   }, input.setInputs);
   sources.push(...sets.sources);
@@ -481,7 +538,7 @@ export function calculate(input) {
     const hit = rule.always || (rule.when === 'inWater' ? !!player.inWater
       : rule.mobs ? hitsMob(rule.mobs, target) : rule.families.some((f) => target.families.includes(f)));
     if (!hit) continue;
-    const value = rule.perMissingHp ? 1 + rule.perMissingHp * (100 - target.hpPct) / 100 : rule.mult;
+    const value = rule.perMissingHp ? 1 + rule.perMissingHp * (100 - (rule.ofPlayer ? playerHpPct : target.hpPct)) / 100 : rule.mult;
     const what = rule.label || `vs ${(rule.mobs || rule.families).join('/')}`;
     if (value !== 1) multiplicative.push({ label: `${weapon.item.name} ${what}`, value });
   }
@@ -518,9 +575,13 @@ export function calculate(input) {
   const damage = totals.DAMAGE || 0;
   const strength = totals.STRENGTH || 0;
   const critDamage = totals.CRITICAL_DAMAGE || 0;
-  const critChance = Math.min(100, Math.max(0, totals.CRITICAL_CHANCE || 0));
+  // The Terminator divides Crit Chance by 4 (its lore); the stat itself is unchanged.
+  const critDivisor = weapon.item?.id === 'TERMINATOR' ? 4 : 1;
+  const effCritChance = (totals.CRITICAL_CHANCE || 0) / critDivisor;
+  if (critDivisor > 1) notes.push(`Terminator divides Crit Chance by 4: ${Math.round(totals.CRITICAL_CHANCE || 0)}% counts as ${+effCritChance.toFixed(1)}%.`);
+  const critChance = alwaysCrit ? 100 : Math.min(100, Math.max(0, effCritChance));
   // Overload: Crit Chance beyond 100% is the chance of a Mega Critical Hit (all of it at 200%).
-  const megaChance = overloadPct ? Math.min(100, Math.max(0, (totals.CRITICAL_CHANCE || 0) - 100)) : 0;
+  const megaChance = overloadPct ? Math.min(100, Math.max(0, effCritChance - 100)) : 0;
 
   const baseDamage = 5 + damage;
   const strengthMult = 1 + strength / 100;
@@ -530,7 +591,10 @@ export function calculate(input) {
   const critMult = 1 + critDamage / 100;
 
   // Target defense reduces the hit after all bonuses: × 100 / (100 + Defense); rounding comes last.
-  const defense = Math.max(0, target.defense || 0);
+  // Last Breath: each earlier hit takes a share of the target's Defense (the First hit setting for one hit).
+  const shredStacks = shred ? (hitNumber ? Math.min(shred.max, hitNumber - 1) : player.firstHit ? 0 : shred.max) : 0;
+  if (shredStacks && target.defense) notes.push(`Last Breath: −${shredStacks * shred.pct}% Defense (${shredStacks} stacks).`);
+  const defense = Math.max(0, (target.defense || 0) * (1 - shredStacks * (shred?.pct || 0) / 100));
   const defenseMult = 100 / (100 + defense);
 
   const preCrit = initial * additiveMult * multMult;
@@ -563,10 +627,10 @@ export function calculate(input) {
   // then magic resistance and defense. A damage-over-time ability's base is spread over its seconds.
   let cast = null;
   if (magic) {
-    const base = weaponSources[0]?.stats.WEAPON_ABILITY_DAMAGE ?? greedBase(spell, weapon.price);
+    const base = spell.fixedBase ? spell.base : weaponSources[0]?.stats.WEAPON_ABILITY_DAMAGE ?? greedBase(spell, weapon.price);
     const perTick = spell.over && !spell.perSecond ? base / spell.over : base;
     const intMult = 1 + intelligence / 100 * spell.scaling;
-    const adMult = 1 + abilityDamage / 100;
+    const adMult = spell.noAbilityDamage ? 1 : 1 + abilityDamage / 100;
     const addMult = spell.noAdditive ? 1 : additiveMult;
     const resist = spell.melee ? 0 : magicResistPct(enemyBlocks(target.enemy));
     const resistMult = 1 - resist / 100;
@@ -585,9 +649,24 @@ export function calculate(input) {
     else if (resist) notes.push(`${target.enemy} takes ${resist}% less Magic Damage.`);
     if (spell.noAdditive) notes.push(`${spell.name} isn't affected by the Additive Multiplier.`);
   }
+  // A melee-hit ability: each of its hits is pct% of the melee hit (with its own crit roll in the simulation),
+  // more with your health missing (roses).
+  if (meleeAbility) {
+    const missingBonus = 1 + (meleeAbility.perMissing10 || 0) * Math.floor((100 - playerHpPct) / 10) / 100;
+    const m = meleeAbility.pct / 100 * missingBonus;
+    cast = {
+      name: spell.name, meleeHit: true, pct: meleeAbility.pct, count: meleeAbility.count, missingBonus,
+      nonCrit: Math.floor(nonCrit * m), crit: Math.floor(crit * m), megaCrit: Math.floor(megaCrit * m),
+      hit: Math.floor(expected * m) * meleeAbility.count, // the average cast
+      manaCost: 0, manaStep: 0, manaReset: 0, over: 0, cooldown: spell.cooldown, charges: spell.charges || null, healthCost: spell.healthCost || 0,
+    };
+    if (spell.healthCost) notes.push(`${spell.name} costs ${spell.healthCost} Health a cast (not modelled until damage taken exists).`);
+  }
 
   return {
     bow, totals, sources, additive, multiplicative, notes, petAbilities: pet.abilities, setStatus: sets.status,
+    // The simulation's: burning damage multiplier, Flaming Fist, Static Charge, Blazing Aura.
+    burnMult: 1 + burnPct / 100, flamingFist, staticCharge, auras: sets.auras,
     damage, strength, critDamage, critChance, soulEaterStr,
     inDungeon: input.dungeonMode === 'catacombs' || input.dungeonMode === 'master',
     masterMode: input.dungeonMode === 'master',
@@ -600,7 +679,7 @@ export function calculate(input) {
     ...(bow && arrowImmune ? { nonCrit: 0, crit: 0, expected: 0, megaCrit: 0 } : {}),
     intelligence, abilityDamage, maxMana, manaRegen, manaRegenPct, manaSources, manaSteal, mage,
     // Magic Damage (damageType 'magic'): the ability's hit, which never crits.
-    ability: cast, ...(cast ? { nonCrit: cast.hit, crit: cast.hit, expected: cast.hit, megaCrit: cast.hit, critChance: 0, megaChance: 0 } : {}),
+    ability: cast, ...(cast && !cast.meleeHit ? { nonCrit: cast.hit, crit: cast.hit, expected: cast.hit, megaCrit: cast.hit, critChance: 0, megaChance: 0 } : {}),
   };
 }
 

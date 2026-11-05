@@ -74,7 +74,9 @@ describe('target-dependent bonuses', () => {
     expect(calculate({ weapon: dagger, target: { mobs: ['Infernal'] } }).multMult).toBe(3.5);
     expect(calculate({ weapon: dagger, target: { mobs: ['Skeletal'] } }).multMult).toBe(2);
     const spirit = { item: sword({ DAMAGE: 95 }, { id: 'SPIRIT_SWORD' }) };
-    expect(calculate({ weapon: spirit, target: { mobs: ['Undead'], hpPct: 25 } }).multMult).toBeCloseTo(2.5);
+    // Your own missing health (the lore), not the target's.
+    expect(calculate({ weapon: spirit, target: { mobs: ['Undead'] }, player: { hpPct: 25 } }).multMult).toBeCloseTo(2.5);
+    expect(calculate({ weapon: spirit, target: { mobs: ['Undead'], hpPct: 25 } }).multMult).toBe(1);
   });
 
   it('Hyperion ×1.5 vs Wither', () => {
@@ -813,7 +815,7 @@ describe('armor damage bonuses', () => {
 
 describe('more pet perks', () => {
   const nums = (other) => ({ LEGENDARY: { 1: { otherNums: other, statNums: {} }, 100: { otherNums: other, statNums: {} } } });
-  const petnums = { PIGMAN: nums([30, 40, 25]), BAT: nums([20, 30, 50, 50]), ROCK: nums([25, 1.3]), GOLEM: nums([20]) };
+  const petnums = { PIGMAN: nums([30, 40, 25]), BAT: nums([20, 30, 50, 50]), ROCK: nums([25, 1.3]), GOLEM: nums([20]), BLAZE: nums([10, 40]) };
   const pet = (id, lore) => ({ id, name: id, rarity: 'LEGENDARY', level: 100, ...petNumbers(petnums, id, 'LEGENDARY', 100), lore: cleanLore(lore) });
   const sword = { item: { id: 'TEST_SWORD', name: 'Test', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95 } } };
 
@@ -822,6 +824,15 @@ describe('more pet perks', () => {
     expect(calculate({ weapon: sword, pet: p }).additiveMult).toBeCloseTo(1.75);
     expect(calculate({ weapon: sword, pet: p, petExtras: { targetLevel: 60 } }).additiveMult).toBeCloseTo(1.5);
     expect(calculate({ weapon: sword, pet: p, petExtras: { targetLevel: 20 } }).additiveMult).toBe(1);
+  });
+
+  it('Blaze Nether Embodiment: +10% stats on the Crimson Isle (Demonlord too, not Kuudra)', () => {
+    const p = pet('BLAZE', ['Nether Embodiment', 'Increases Combat and Miscellaneous', 'stats by {0}% while on the Crimson', 'Isle.']);
+    const str = (enemy) => calculate({ weapon: sword, pet: p, bonuses: [{ STRENGTH: 100 }], target: { enemy, mobs: [] } }).strength;
+    const off = str('Zealot');
+    expect(str('Inferno Demonlord IV') / off).toBeCloseTo(1.1);
+    expect(str('Magma Boss') / off).toBeCloseTo(1.1);
+    expect(str('Kuudra (Infernal Lair phase, not finished)')).toBe(off);
   });
 
   it('Bat Wings of Steel: ×(1 + k%) vs Spooky', () => {
@@ -876,14 +887,149 @@ describe('accessory and class sources', () => {
   });
 });
 
+describe('item abilities from lore (itemEffects.js)', () => {
+  const it2 = (id, category, stats = {}) => ({ item: { id, name: id, category, tier: 'LEGENDARY', stats } });
+  const sword = it2('TEST_SWORD', 'SWORD', { DAMAGE: 100 });
+  const at = (enemy, mobs = [], extra = {}) => ({ target: { enemy, mobs, families: [] }, ...extra });
+
+  it('End Armor doubles on the End Island (Voidgloom too), not elsewhere', () => {
+    const armor = [it2('END_CHESTPLATE', 'CHESTPLATE', { STRENGTH: 10 })];
+    const str = (enemy) => calculate({ weapon: sword, armor, ...at(enemy) }).strength;
+    expect(str('Zealot') - str('Graveyard Zombie')).toBe(10);
+    expect(str('Voidgloom Seraph IV') - str('Graveyard Zombie')).toBe(10);
+  });
+  it('Heat Armor triples Strength on Mining Islands; Rampart adds stats on the Crimson Isle', () => {
+    const heat = [it2('HEAT_CHESTPLATE', 'CHESTPLATE', { STRENGTH: 10, HEALTH: 50 })];
+    expect(calculate({ weapon: sword, armor: heat, ...at('Ghost') }).strength - calculate({ weapon: sword, armor: heat, ...at('Zealot') }).strength).toBe(20);
+    const rampart = [it2('RAMPART_CHESTPLATE', 'CHESTPLATE'), it2('RAMPART_LEGGINGS', 'LEGGINGS')];
+    expect(calculate({ weapon: sword, armor: rampart, ...at('Inferno Demonlord IV') }).strength
+      - calculate({ weapon: sword, armor: rampart, ...at('Zealot') }).strength).toBe(40);
+  });
+  it('Bat Person Armor: ×2 at night, ×3 against Spooky mobs', () => {
+    const armor = [it2('BAT_PERSON_CHESTPLATE', 'CHESTPLATE', { STRENGTH: 10 })];
+    const day = calculate({ weapon: sword, armor }).strength;
+    expect(calculate({ weapon: sword, armor, accessoryInputs: { time: 'night' } }).strength - day).toBe(10);
+    expect(calculate({ weapon: sword, armor, target: { enemy: 'Scarecrow', mobs: ['Spooky'], families: [] } }).strength - day).toBe(20);
+  });
+  it('Adaptive Belt gives its class bonus', () => {
+    const belt = [it2('ADAPTIVE_BELT', 'BELT')];
+    const none = calculate({ weapon: sword, equipment: belt }).strength;
+    expect(calculate({ weapon: sword, equipment: belt, dungeonClass: { id: 'berserk', level: 50 } }).strength - none).toBe(10);
+  });
+  it('gauntlets multiply damage against their mob types', () => {
+    const r = (id, mobs) => calculate({ weapon: sword, equipment: [it2(id, 'GLOVES')], target: { mobs, families: [] } }).multMult;
+    expect(r('DEMONLORD_GAUNTLET', ['Infernal'])).toBeCloseTo(1.15);
+    expect(r('DEMONLORD_GAUNTLET', ['Undead'])).toBe(1);
+    expect(r('MAGMA_LORD_GAUNTLET', ['Magmatic'])).toBeCloseTo(1.3);
+  });
+  it('Hyperion family gains stats per Catacombs level; Sting always crits', () => {
+    const hype = it2('HYPERION', 'SWORD', { DAMAGE: 260 });
+    expect(calculate({ weapon: hype, catacombsLevel: 40 }).damage - calculate({ weapon: hype }).damage).toBe(40);
+    expect(calculate({ weapon: it2('STING', 'SWORD', { DAMAGE: 100 }) }).critChance).toBe(100);
+  });
+  it('Void Sword: +20 Strength per Ender Armor piece', () => {
+    const armor = ['HELMET', 'BOOTS'].map((s) => it2(`END_${s}`, s));
+    const v = it2('VOID_SWORD', 'SWORD');
+    expect(calculate({ weapon: v, armor }).strength - calculate({ weapon: v }).strength).toBe(40);
+  });
+});
+
+describe('counter weapons (kills, levels, purse)', () => {
+  const w = (id, counters, DAMAGE = 100) => ({ item: { id, name: id, category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE } }, counters });
+  it('Pooch Sword: +20 Damage per Wolf Slayer level, the maximum when unset', () => {
+    expect(calculate({ weapon: w('POOCH_SWORD', { wolfSlayer: 5 }) }).damage).toBe(200);
+    expect(calculate({ weapon: w('POOCH_SWORD') }).damage).toBe(280);
+  });
+  it('Raider Axe: kills and wood, each capped', () => {
+    const r = calculate({ weapon: w('RAIDER_AXE', { kills: 5000, wood: 1e9 }) });
+    expect(r.damage).toBe(110);
+    expect(r.strength).toBe(100); // capped at +100 from wood
+  });
+  it('Emerald Blade: 2.5 × purse^(1/4), capped at 2B', () => {
+    expect(calculate({ weapon: w('EMERALD_BLADE', { purse: 1e8 }) }).damage).toBeCloseTo(100 + 2.5 * 100, 0);
+    expect(calculate({ weapon: w('EMERALD_BLADE', { purse: 1e10 }) }).damage).toBeCloseTo(100 + 2.5 * Math.pow(2e9, 0.25), 0);
+  });
+  it('Great Spook Sword: none without Fear', () => {
+    expect(calculate({ weapon: w('GREAT_SPOOK_SWORD') }).damage).toBe(100);
+    expect(calculate({ weapon: w('GREAT_SPOOK_SWORD', { fear: 30 }) }).damage).toBe(130);
+  });
+});
+
+describe('melee-hit abilities and new abilities (group 4)', () => {
+  const w = (id, stats = { DAMAGE: 100 }, extra = {}) => ({ item: { id, name: id, category: 'SWORD', tier: 'LEGENDARY', stats }, ...extra });
+  it('Reaving Strike is 135% of the melee hit (Felthorn Reaper), with crits', () => {
+    const r = calculate({ weapon: w('FELTHORN_REAPER'), damageType: 'magic' });
+    const melee = calculate({ weapon: w('FELTHORN_REAPER') });
+    expect(r.ability.nonCrit).toBe(Math.floor(melee.nonCrit * 1.35));
+    expect(r.ability.crit).toBe(Math.floor(melee.crit * 1.35));
+    expect(r.ability.charges).toEqual({ max: 5, every: 4 });
+  });
+  it('roses skip Sharpness; Bouquet of Lies +2% per 10% of your health missing', () => {
+    const plain = calculate({ weapon: w('BOUQUET_OF_LIES'), damageType: 'magic' }).ability.nonCrit;
+    expect(calculate({ weapon: w('BOUQUET_OF_LIES', undefined, { enchants: { sharpness: 7 } }), damageType: 'magic' }).ability.nonCrit).toBe(plain);
+    const hurt = calculate({ weapon: w('BOUQUET_OF_LIES'), damageType: 'magic', player: { hpPct: 45 } }).ability;
+    expect(hurt.missingBonus).toBeCloseTo(1.1); // 55% missing: 5 × 2%
+    expect(hurt.count).toBe(3);
+  });
+  it('Felthorn Reaper: +1% per 1% of the target missing health; Bone Reaver: your own, vs Undead', () => {
+    expect(calculate({ weapon: w('FELTHORN_REAPER'), target: { hpPct: 40 } }).multMult).toBeCloseTo(1.6);
+    expect(calculate({ weapon: w('BONE_REAVER'), target: { mobs: ['Undead'] }, player: { hpPct: 70 } }).multMult).toBeCloseTo(1.3);
+    expect(calculate({ weapon: w('BONE_REAVER'), target: { mobs: [] }, player: { hpPct: 70 } }).multMult).toBe(1);
+  });
+  it('Starlight Wand: Starfall 300 a second with 0.3 Intelligence scaling', () => {
+    const r = calculate({ weapon: w('STARLIGHT_WAND', {}), damageType: 'magic' }).ability;
+    expect(r.over).toBe(5);
+    expect(r.hit).toBe(300);
+  });
+  it('Eye Beam ignores Intelligence and Ability Damage', () => {
+    const helm = { item: { id: 'PRECURSOR_EYE', name: 'Precursor Eye', category: 'HELMET', tier: 'LEGENDARY', stats: { INTELLIGENCE: 1000 } } };
+    expect(calculate({ weapon: w('TEST_SWORD'), armor: [helm], damageType: 'eyebeam' }).ability.hit).toBe(4000);
+  });
+});
+
+describe('Last Breath', () => {
+  const lb = { item: { id: 'LAST_BREATH', name: 'Last Breath', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 200 } } };
+  it('−10% of the target Defense per earlier hit, 5 stacks at most', () => {
+    const hit = (n) => calculate({ weapon: lb, target: { defense: 1000 }, player: { hitNumber: n } }).nonCrit;
+    const plain = (def) => calculate({ weapon: lb, target: { defense: def }, player: { hitNumber: 1 } }).nonCrit;
+    expect(hit(1)).toBe(plain(1000));
+    expect(hit(3)).toBe(plain(800));
+    expect(hit(9)).toBe(plain(500));
+  });
+});
+
+describe('Implosion Belt', () => {
+  const belt = { item: { id: 'IMPLOSION_BELT', name: 'Implosion Belt', category: 'BELT', tier: 'EPIC', stats: { DEFENSE: 70 } } };
+  const hype = { item: { id: 'HYPERION', name: 'Hyperion', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 260 } } };
+  it('×1.25 on explosion abilities only', () => {
+    const cast = (equipment, weapon = hype) => calculate({ weapon, equipment, damageType: 'magic' }).ability.hit;
+    expect(cast([belt]) / cast([])).toBeCloseTo(1.25, 2);
+    const wand = { item: { id: 'FIRE_VEIL_WAND', name: 'Fire Veil Wand', category: 'WAND', tier: 'LEGENDARY', stats: {} } };
+    expect(cast([belt], wand)).toBe(cast([], wand));
+    expect(calculate({ weapon: hype, equipment: [belt] }).multMult).toBe(1); // melee hits aren't explosions
+  });
+});
+
 describe('Overload', () => {
   const bowW = (CRITICAL_CHANCE) => ({ item: { id: 'TEST_BOW', name: 'Bow', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 95, CRITICAL_CHANCE } }, enchants: { overload: 5 } });
   it('Crit Chance over 100% is the chance of a +50% Mega Critical Hit', () => {
-    const r = calculate({ weapon: bowW(120) }); // 30 base + 120 = 150 Crit Chance: 50% mega
-    expect(r.megaChance).toBe(50);
+    const r = calculate({ weapon: bowW(120) }); // 30 base + 120 + 5 (Overload V) = 155 Crit Chance: 55% mega
+    expect(r.megaChance).toBe(55);
     expect(r.megaCrit).toBe(Math.floor(r.crit * 1.5));
-    expect(r.expected).toBeCloseTo(r.crit + (r.megaCrit - r.crit) * 0.5, 0);
+    expect(r.expected).toBeCloseTo(r.crit + (r.megaCrit - r.crit) * 0.55, 0);
     expect(calculate({ weapon: bowW(50) }).megaChance).toBe(0);
+  });
+  it('adds its own Crit Chance and Crit Damage', () => {
+    const plain = calculate({ weapon: { ...bowW(0), enchants: {} } });
+    const r = calculate({ weapon: bowW(0) });
+    expect(r.critChance - plain.critChance).toBe(5);
+    expect(r.critDamage - plain.critDamage).toBe(5);
+  });
+  it('Terminator divides Crit Chance by 4, Mega Crits included', () => {
+    const term = (CRITICAL_CHANCE) => ({ item: { id: 'TERMINATOR', name: 'Terminator', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 310, CRITICAL_CHANCE } }, enchants: { overload: 5 } });
+    expect(calculate({ weapon: term(165) }).critChance).toBe(50); // (30 + 165 + 5) / 4
+    expect(calculate({ weapon: term(165) }).megaChance).toBe(0);
+    expect(calculate({ weapon: term(565) }).megaChance).toBe(50); // 600 / 4 = 150
   });
   it('only bows take it', () => {
     const sword = { item: { id: 'TEST_SWORD', name: 'S', category: 'SWORD', tier: 'LEGENDARY', stats: { DAMAGE: 95, CRITICAL_CHANCE: 200 } }, enchants: { overload: 5 } };

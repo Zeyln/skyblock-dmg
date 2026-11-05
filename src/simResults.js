@@ -12,8 +12,10 @@ function hitsByWeapon(s) {
     const ticks = s.events.filter((e) => e.dot).length;
     rows.push({ name: s.spellName, count: casts, unit: 'casts', ...(ticks ? { note: `and ${ticks} more seconds of its damage over time` } : {}) });
   }
-  const burns = s.events.filter((e) => e.fire).length;
-  if (burns) rows.push({ name: 'Fire Aspect', count: burns, unit: 'burn ticks' });
+  for (const [src, name, unit] of [['fire', 'Fire Aspect', 'burn ticks'], ['fist', 'Flaming Fist', 'burn ticks'], ['aura', 'Blazing Aura', 'ticks'], ['eye', 'Eye Beam', 'seconds']]) {
+    const n = s.events.filter((e) => e.fire && (e.src || 'fire') === src).length;
+    if (n) rows.push({ name, count: n, unit });
+  }
   const phases = s.phases || [];
   const shots = phases.filter((p) => p.kind === 'shield' && p.shots).reduce((n, p) => n + p.shots.length, 0);
   if (shots) rows.push({ name: s.terminatorName || 'Terminator', count: shots, unit: 'shots', note: `${shots * 3} explosive arrows at Hitshields` });

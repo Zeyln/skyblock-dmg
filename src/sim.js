@@ -6,11 +6,18 @@ import {
   DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, enemyBlocks,
 } from './data/mechanics.js';
 import { phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines, scheduledPhases } from './bossMechanics.js';
-import { DUNGEON_HIT_MANA } from './data/abilities.js';
+import { DUNGEON_HIT_MANA, EYE_BEAM } from './data/abilities.js';
 import { makeClock, CLOCKS } from './clock.js';
 
 // Hits keep coming until the enemy dies; this stops "until dead" fights against huge HP pools.
 export const SIM_MAX_SECONDS = 600;
+// Flaming Fist: each melee hit fires three fists of 10,000 fire damage, 1,000 a tick over 10 ticks (wiki,
+// Flaming Fist, Nov 2026); two of the three stay where they spawn (a bug the wiki lists), so one reaches the
+// target. Each hit's fist burns on its own, so they overlap.
+export const FLAMING_FIST = { perTick: 1000, ticks: 10 };
+// Static Charge (Thunder Armor, Thunderbolt Necklace): a charge every 30 s, at most 2, each +15% on the
+// next hit (NEU lore); full at the start (assumed).
+export const STATIC_CHARGE = { every: 30, max: 2, pct: 15 };
 
 // Small seeded RNG (mulberry32) so a run can be repeated.
 function rng(seed) {
@@ -68,7 +75,7 @@ function fight(input, opts, skip) {
 
   // The player's health stays where it starts until a health system exists (god mode or not).
   const playerHpPct = Math.min(100, Math.max(1, opts.playerHpPct ?? 100));
-  const player = { ...input.player, fullHealth: playerHpPct >= 100, lowHealth: playerHpPct < 20 };
+  const player = { ...input.player, hpPct: playerHpPct, fullHealth: playerHpPct >= 100, lowHealth: playerHpPct < 20 };
 
   const base = calculate({ ...input, player: { ...player, hitNumber: 1 } });
   let maxHp = base.targetMaxHp || 0; // changes when a second boss takes over (Conjoined Brood)
@@ -133,6 +140,38 @@ function fight(input, opts, skip) {
   // strongest hit since it was lit; a melee hit lights or refreshes it.
   const fireFx = !bow ? base.fire : null;
   let fire = null;
+  // Rekindled Ember Armor: more burning damage, on Fire Aspect's burn and the Flaming Fist's.
+  const burnMult = base.burnMult || 1;
+  // Flaming Fist: the fists burning at each coming tick (tick -> count), and the next such tick.
+  const fistOn = !bow && !!base.flamingFist;
+  const fistAt = new Map();
+  let fistNext = Infinity;
+  const nextFist = () => (fistAt.size ? Math.min(...fistAt.keys()) : Infinity);
+  let fistCount = 0;
+  // Blazing Aura (Blaze or Frozen Blaze Armor): from the start, a tick each second on the target.
+  const aura = base.auras?.[0] || null;
+  let auraNext = aura ? TICKS_PER_SECOND : Infinity;
+  // Static Charge: charges held, and the tick the next one comes.
+  let charges = base.staticCharge ? STATIC_CHARGE.max : 0;
+  let nextCharge = STATIC_CHARGE.every * TICKS_PER_SECOND;
+  // Charges (Reaving Strike): casts held, and the tick the next comes back (one at a time, while short).
+  const chargeDef = spell?.charges || null;
+  let chargesLeft = chargeDef ? chargeDef.max : 0;
+  let chargeAt = Infinity;
+  const refill = (tick) => {
+    while (chargeDef && tick >= chargeAt) {
+      chargesLeft++;
+      chargeAt = chargesLeft < chargeDef.max ? chargeAt + chargeDef.every * TICKS_PER_SECOND : Infinity;
+    }
+  };
+  // Precursor Eye's Eye Beam: on from the first tick, a tick of damage each second while the mana lasts.
+  // Short of mana it goes off, and comes back on (from its first second) once there's enough.
+  const eyeOn = (input.armor || []).some((p) => (p?.item?.id || '').replace(/^STARRED_/, '') === 'PRECURSOR_EYE');
+  const eye = eyeOn ? calculate({ ...input, damageType: 'eyebeam', player: { ...player, hitNumber: 1 } }).ability : null;
+  let eyeNext = eye ? firstTick : Infinity;
+  let eyeSec = 0;
+  // Last Breath stacks by hit number, so hit results are told apart up to its last stack.
+  const hitKeyCap = (input.weapon?.item?.id || '').replace(/^STARRED_/, '') === 'LAST_BREATH' ? 6 : 4;
   // A cost that climbs with each cast (Jerry-chine Gun) until manaReset passes without one.
   let streak = 0;
   let lastCast = -Infinity;
@@ -142,6 +181,7 @@ function fight(input, opts, skip) {
   // When the next cast can go off: its cooldown is up and there's the mana (regen comes each whole second).
   // A climbing cost may be cheaper to wait out until it resets.
   const castReady = () => {
+    if (chargeDef) return chargesLeft > 0 ? nextCast : Math.max(nextCast, chargeAt);
     const cost = costAt(nextCast);
     if (mana >= cost - 1e-9) return nextCast;
     const enough = (c) => (manaSec + Math.ceil((c - mana) / base.manaRegen - 1e-9)) * TICKS_PER_SECOND;
@@ -152,7 +192,8 @@ function fight(input, opts, skip) {
   // The next tick something is due (never before now).
   const wake = (tick) => Math.max(tick, Math.min(swinging ? onClick(Math.max(nextSwing, tick), swingSide) : Infinity,
     casting ? onClick(Math.max(castReady(), tick), 'right') : Infinity,
-    casting && nextCast > tick ? nextCast : Infinity, dots.length ? dots[0] : Infinity, fire ? fire.next : Infinity));
+    casting && nextCast > tick ? nextCast : Infinity, dots.length ? dots[0] : Infinity, fire ? fire.next : Infinity,
+    fistNext, auraNext, eyeNext));
 
   // Weapons the player swaps between: the main one, and a second Blaze Slayer dagger (input.weapon2).
   const weapons = [input.weapon, input.weapon2].filter((w) => w?.item);
@@ -166,7 +207,7 @@ function fight(input, opts, skip) {
     const fourth = !magic && n % 4 === 0;
     const third = !magic && n % 3 === 0; // Primordial Armor
     const pct = side ? Math.round(side.pct * 10) / 10 : maxHp ? Math.round(hpPct * 10) / 10 : hpPct;
-    const key = `${Math.min(n, 4)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}|${toss}|${magic}`;
+    const key = `${Math.min(n, hitKeyCap)}|${pct}|${stacks}|${tenth}|${fourth}|${third}|${broodOn}|${w}|${side?.maxHp}|${toss}|${magic}`;
     let r = cache.get(key);
     if (!r) {
       const targetMax = side ? { maxHp: side.maxHp } : broodOn ? { maxHp: input.target.maxHp * broodB.hpMult } : {};
@@ -193,8 +234,8 @@ function fight(input, opts, skip) {
     return r;
   };
 
-  const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, casts: 0, dotTicks: 0, fireTicks: 0,
-    damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0, ability: 0, fire: 0 } };
+  const out = { hits: 0, crits: 0, ferocity: 0, lightning: 0, swipes: 0, casts: 0, dotTicks: 0, fireTicks: 0, fistTicks: 0, auraTicks: 0,
+    eyeTicks: 0, discharges: 0, damage: { hits: 0, ferocity: 0, lightning: 0, swipes: 0, ability: 0, fire: 0, fist: 0, aura: 0, eye: 0 } };
   // The player's stats over the fight, as [low, high] by stat: those of every hit and Terminator shot.
   const statRanges = {};
   const trackStats = (totals) => {
@@ -544,6 +585,9 @@ function fight(input, opts, skip) {
     }
     const action = dots.length && dots[0] <= tick ? 'dot'
       : fire && fire.next <= tick ? 'fire'
+      : fistNext <= tick ? 'fist'
+      : auraNext <= tick ? 'aura'
+      : eyeNext <= tick ? 'eye'
       : casting && tick >= castReady() && tick >= onClick(tick, 'right') ? 'cast'
         : swinging && tick >= nextSwing && tick >= onClick(tick, swingSide) ? 'swing' : null;
     if (!action) {
@@ -551,17 +595,24 @@ function fight(input, opts, skip) {
       n--;
       continue;
     }
-    // A Fire Aspect tick: the burn moves on to its next second (or runs out). None lands while the boss
-    // can't be hurt by it: behind a Hitshield, split into demons, or with pups to kill first.
+    // A Fire Aspect, Flaming Fist or Blazing Aura tick: the burn moves on to its next second (or runs out).
+    // None lands while the boss can't be hurt by it: behind a Hitshield, split into demons, or with pups
+    // to kill first.
     let burn = 0;
+    const periodic = action === 'fire' || action === 'fist' || action === 'aura' || action === 'eye';
     if (action === 'fire') {
       burn = fire.dmg;
       fire.next += TICKS_PER_SECOND;
       if (fire.next > fire.until) fire = null;
-      if (shield || demons || pups?.some((p) => p.hp > 0)) {
-        n--;
-        continue;
-      }
+    } else if (action === 'fist') {
+      fistCount = fistAt.get(fistNext);
+      fistAt.delete(fistNext);
+      fistNext = nextFist();
+    } else if (action === 'aura') auraNext += TICKS_PER_SECOND;
+    else if (action === 'eye') eyeNext += TICKS_PER_SECOND;
+    if (periodic && (shield || demons || pups?.some((p) => p.hp > 0))) {
+      n--;
+      continue;
     }
     const swing = action === 'swing';
     // Inferno Demonlord: hit the damageable demon if split, else the boss; with the Hellion Shield,
@@ -608,7 +659,7 @@ function fight(input, opts, skip) {
     side = add ? { maxHp: add.maxHp / derpy, pct: add.hp / add.maxHp * 100 } : null;
 
     // (The tolerance keeps float sums like 57.85 + 0.2 from leaving a window open forever.)
-    if (action === 'dot' || action === 'fire') {
+    if (action === 'dot' || periodic) {
       // Damage over time keeps going while the player is busy, but not while the boss is immune.
       if (immune.some(([a, b]) => t >= a && t < b - 1e-9)) {
         if (action === 'dot') dots.shift();
@@ -631,6 +682,7 @@ function fight(input, opts, skip) {
     let strikes = 0;
     let swipeReady = false;
     let step = ticksPerHit;
+    let hitMult = 1; // Static Charge's discharge, on the hit itself
     const bonuses = [];
     if (swing) {
       // Dominus: a melee hit gains a stack if the last one was long enough ago; at 10 stacks it swipes.
@@ -663,6 +715,19 @@ function fight(input, opts, skip) {
       let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
       if (shieldB?.feroDivisor && !shield) fero /= shieldB.feroDivisor;
       strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
+      // Static Charge: charges come every 30 s (at most 2); a hit discharges them all.
+      if (base.staticCharge) {
+        while (tick >= nextCharge) {
+          charges = Math.min(STATIC_CHARGE.max, charges + 1);
+          nextCharge += STATIC_CHARGE.every * TICKS_PER_SECOND;
+        }
+        if (charges) {
+          hitMult = 1 + charges * STATIC_CHARGE.pct / 100;
+          charges = 0;
+          out.discharges++;
+          bonuses.push('Static Charge');
+        }
+      }
       out.hits++;
       if (crit) out.crits++;
       out.ferocity += strikes;
@@ -670,13 +735,45 @@ function fight(input, opts, skip) {
       if (hitMana) mana = Math.min(maxMana, mana + hitMana);
     } else if (action === 'fire') {
       r = base;
-      dmg = Math.floor(burn * fireFx.pct / 100);
+      dmg = Math.floor(burn * fireFx.pct / 100 * burnMult);
       out.fireTicks++;
+    } else if (action === 'fist') {
+      r = base;
+      dmg = Math.floor(FLAMING_FIST.perTick * fistCount * burnMult);
+      out.fistTicks++;
+    } else if (action === 'aura') {
+      r = base;
+      const auraMax = side ? side.maxHp : maxHp;
+      dmg = Math.floor(Math.min(aura.cap, aura.flat + aura.pct / 100 * auraMax));
+      out.auraTicks++;
+    } else if (action === 'eye') {
+      r = base;
+      manaTo(t);
+      const k = Math.min(EYE_BEAM.ramp.seconds, eyeSec);
+      const cost = eye.manaCost * (1 + EYE_BEAM.ramp.costPct / 100 * k);
+      if (mana < cost - 1e-9) {
+        eyeSec = 0; // out of mana: off, back on from its first second
+        dmg = 0;
+      } else {
+        mana -= cost;
+        lowestMana = Math.min(lowestMana, mana);
+        dmg = Math.floor(eye.hit * (1 + EYE_BEAM.ramp.pct / 100 * k));
+        eyeSec++;
+        out.eyeTicks++;
+      }
     } else {
-      // Magic Damage: no crits, Ferocity, lightning or swipes.
-      r = hitResult(n, 0, 0, false, true);
+      // Magic Damage: no crits, Ferocity, lightning or swipes. A melee-hit ability (Reaving Strike, roses)
+      // rolls a crit for each of its hits, still without Ferocity, lightning or swipes.
+      r = hitResult(n, spell.meleeHit ? stacks : 0, 0, false, true);
       trackStats(r.totals);
-      dmg = r.nonCrit;
+      if (spell.meleeHit) {
+        dmg = 0;
+        for (let k = 0; k < spell.count; k++) {
+          const c = random() * 100 < r.critChance;
+          if (c) crit = true;
+          dmg += c ? r.ability.crit : r.ability.nonCrit;
+        }
+      } else dmg = r.nonCrit;
       if (action === 'cast') {
         mana -= costAt(tick);
         streak = spell.manaStep && tick < resetTick() ? streak + 1 : 1;
@@ -684,6 +781,12 @@ function fight(input, opts, skip) {
         lowestMana = Math.min(lowestMana, mana);
         nextCast = clock.plain ? tick + castEvery : Math.max(tick + 1, tick + (spell.over || 0) * TICKS_PER_SECOND,
           toTick(clock.after(t, spell.cooldown, CLOCKS.abilityCooldown)));
+        if (chargeDef) {
+          refill(tick);
+          chargesLeft--;
+          if (chargeAt === Infinity) chargeAt = tick + chargeDef.every * TICKS_PER_SECOND;
+          nextCast = tick + 1;
+        }
         for (let k = 1; k < spell.over; k++) dots.push(tick + k * TICKS_PER_SECOND);
         out.casts++;
       } else {
@@ -692,7 +795,7 @@ function fight(input, opts, skip) {
       }
     }
     // A cast or a tick of its damage over time, for the indicator and results.
-    const mark = swing ? {} : action === 'fire' ? { fire: dmg } : { ability: spell.name, [action]: true };
+    const mark = swing ? {} : periodic ? { fire: dmg, src: action } : { ability: spell.name, [action]: true };
     if (casting) mark.mana = mana;
 
     if (shield) {
@@ -715,9 +818,9 @@ function fight(input, opts, skip) {
     // Hellion Shield: an unmatched hit and every Ferocity strike lose 99%; enchant damage
     // (lightning, swipes) gets through in full.
     const shieldCut = (x) => Math.floor(x * (1 - HELLION_REDUCTION));
-    const hitDmg = matched || action === 'fire' ? dmg : shieldCut(dmg); // the burn is enchant damage too
+    const hitDmg = Math.floor((matched || periodic ? dmg : shieldCut(dmg)) * hitMult + 1e-6); // burns and the aura get through too
     const feroDmg = need ? shieldCut(dmg) : dmg;
-    out.damage[swing ? 'hits' : action === 'fire' ? 'fire' : 'ability'] += hitDmg;
+    out.damage[swing ? 'hits' : periodic ? action : 'ability'] += hitDmg;
     out.damage.ferocity += feroDmg * strikes;
     out.damage.lightning += bolt;
     out.damage.swipes += swipe;
@@ -775,11 +878,15 @@ function fight(input, opts, skip) {
       if (fire) Object.assign(fire, { dmg: Math.max(fire.dmg, hitDmg), until });
       else fire = { dmg: hitDmg, until, next: tick + TICKS_PER_SECOND };
     }
+    if (swing && fistOn && hitDmg > 0) {
+      for (let k = 1; k <= FLAMING_FIST.ticks; k++) fistAt.set(tick + k, (fistAt.get(tick + k) || 0) + 1);
+      fistNext = nextFist();
+    }
     if (need && matched && ++attuneHits >= HELLION_SWITCH_HITS) {
       attuneHits = 0;
       attune = (attune + 1) % HELLION_ORDER.length;
     }
-    const struck = record({ t, w, hit: action === 'fire' ? 0 : hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
+    const struck = record({ t, w, hit: periodic ? 0 : hitDmg, crit, ferocity: strikes, swipe, bonuses, damage: dealt, total, hp, maxHp,
       ...(broodOn ? { target: 'Conjoined Brood', tid: 'brood', tidStart: maxHp } : { tid: 'boss', tidStart: startHp }), ...mark }, feroPart);
     if (maxHp) {
       bossStrikes.push(...struck.slice(1));
@@ -895,11 +1002,18 @@ function fight(input, opts, skip) {
   if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (fireFx) notes.push(`${fireFx.label}: ${fireFx.pct}% of the igniting hit each second for ${fireFx.seconds} s; later hits refresh it and raise it if stronger.`);
+  if (burnMult !== 1 && (fireFx || fistOn)) notes.push(`Rekindle: burning damage ×${+burnMult.toFixed(2)}.`);
+  if (fistOn) notes.push(`Flaming Fist: each melee hit sends one fist (the other two stay put, a known bug) dealing ${FLAMING_FIST.perTick.toLocaleString('en-US')} fire damage a tick for ${FLAMING_FIST.ticks} ticks; fists from later hits overlap.`);
+  if (aura) notes.push(`${aura.name}: ${aura.flat ? `${aura.flat} + ` : ''}${aura.pct}% of the target's max Health each second, at most ${aura.cap}.`);
+  if (eye) notes.push(`Eye Beam (Precursor Eye): on from the start, ${Math.round(eye.hit).toLocaleString('en-US')} a second rising +${EYE_BEAM.ramp.pct}% each second for ${EYE_BEAM.ramp.seconds} s (taken as linear), ${Math.round(eye.manaCost)} mana a second rising +${EYE_BEAM.ramp.costPct}%; out of mana it goes off and starts over once there's enough.`);
+  if (base.staticCharge) notes.push(`Static Charge: a charge every ${STATIC_CHARGE.every} s (at most ${STATIC_CHARGE.max}, full at the start), each +${STATIC_CHARGE.pct}% on the next hit.`);
   if (terminator) notes.push(`Hitshields are shot down with a Terminator: ${TERMINATOR_ARROWS} explosive arrows into the ground under the boss every ${termShot} s, each explosion a hit plus its Ferocity strikes.`);
   for (const n of blockNotes(blocks, { weapons: weapons.length })) notes.push(`Boss phases: ${n}.`);
   if (casting) {
     if (spell.manaStep) notes.push(`${spell.name}: each cast costs ${Math.round(spell.manaStep)} more mana than the last, back to ${Math.round(spell.manaCost)} after ${spell.manaReset} s without one.`);
-    notes.push(`${spell.name}: ${Math.round(spell.manaCost)} mana a cast, at most every ${castEvery / TICKS_PER_SECOND} s; ${Math.round(maxMana)} max mana, +${Math.round(base.manaRegen)} a second.`);
+    if (spell.meleeHit) {
+      notes.push(`${spell.name}: ${spell.count > 1 ? `${spell.count} hits of ` : ''}${spell.pct}% of a melee hit${spell.missingBonus > 1 ? ` (×${+spell.missingBonus.toFixed(2)} for your missing health)` : ''}, each rolling its own crit, without Ferocity; ${chargeDef ? `${chargeDef.max} charges, one back every ${chargeDef.every} s` : `every ${castEvery / TICKS_PER_SECOND} s`}.`);
+    } else notes.push(`${spell.name}: ${Math.round(spell.manaCost)} mana a cast, at most every ${castEvery / TICKS_PER_SECOND} s; ${Math.round(maxMana)} max mana, +${Math.round(base.manaRegen)} a second.`);
     if (spell.over) notes.push(`${spell.name} deals its damage over ${spell.over} s and is recast once it runs out.`);
   }
   if (!blocks.length && input.target?.boss) notes.push('Boss damage caps are not modelled.');
@@ -909,7 +1023,7 @@ function fight(input, opts, skip) {
     endHp: hp, total, dps: fightSeconds > 0 ? total / fightSeconds : 0,
     hitsPerSecond: clock.tps / ticksPerHit, ...out, events, phases, notes, mechanics, statRanges,
     // The ability, if cast: its name, and the mana pool and its lowest point.
-    attack: casting ? attack : 'left', spellName: spell?.name || null, maxMana, lowestMana: casting ? lowestMana : null,
+    attack: casting ? attack : 'left', spellName: spell?.name || null, maxMana, lowestMana: casting || eye ? lowestMana : null,
     manaWaits: casting ? manaWaits : null,
     manaWaitSeconds: casting ? manaWaits.reduce((sum, [a, b]) => sum + b - a, 0) : null,
     // The weapons by event w (the main one, then a second dagger), and the Terminator if one was used.

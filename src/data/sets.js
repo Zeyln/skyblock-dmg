@@ -8,7 +8,7 @@
 //   min: pieces needed for the bonus; full: pieces in a full set
 //   inputs: situational values the user supplies [{ key, label, type: 'number'|'toggle', min, max, def }]
 //   effect(ctx) -> { additive?, multiplier?, stats?, statPct?, pieceStatPct?, post?, manaCost? (× ability mana cost), text, inactive? }
-//     ctx: { count, tier, bow, magic (an ability's damage), inWater, inDungeon, target, weaponId, cataLevel, speed, input(key) }
+//     ctx: { count, tier, bow, magic (an ability's damage), explosion (an explosion ability), inWater, inDungeon, target, weaponId, cataLevel, speed, input(key) }
 //   noHitEffect: description for sets that are detected but don't change a single hit.
 
 const KUUDRA_TIERS = ['Basic', 'Hot', 'Burning', 'Fiery', 'Infernal'];
@@ -241,6 +241,17 @@ export const SETS = [
       return { stats: { CRITICAL_DAMAGE: n }, text: `+1 Crit Damage per 1,000 Magma Cube kills (+${n}, max 10)` };
     },
   },
+  // Blazing Aura: each second, mobs within 5 blocks take (flat +) 3% of their max Health, at most 500 a
+  // second plus 100 per 5,000 Blaze Rods collected (NEU lore). The simulation deals it (aura).
+  ...[['blaze_armor', 'Blaze Armor', 'Blazing Aura', 'BLAZE', 0], ['frozen_blaze_armor', 'Frozen Blaze Armor', 'Frozen Blazing Aura', 'FROZEN_BLAZE', 300]]
+    .map(([id, name, bonus, prefixId, flat]) => ({
+      id, name, bonus, slot: 'armor', match: (x) => new RegExp(`^${prefixId}_(HELMET|CHESTPLATE|LEGGINGS|BOOTS)$`).test(x), min: 4, full: 4,
+      inputs: [{ key: 'rods', label: 'Blaze Rod collection', type: 'number', min: 0, def: 50000 }],
+      effect: ({ input }) => {
+        const cap = 500 + 100 * Math.floor(Math.max(0, input('rods') || 0) / 5000);
+        return { aura: { name: bonus, flat, pct: 3, cap }, text: `${flat ? `${flat} + ` : ''}3% of max Health a second, at most ${cap} (simulation)` };
+      },
+    })),
   {
     id: 'vanq_blaze', name: 'Vanquished Blaze Belt', bonus: 'Blaze Consumer', slot: 'equipment',
     match: ids('VANQUISHED_BLAZE_BELT'), min: 1, full: 1,
@@ -257,6 +268,15 @@ export const SETS = [
     effect: ({ input, bow, magic }) => (input('teleported') && !bow && !magic
       ? { additive: 10, text: '+10% damage on the next melee hit after teleporting' }
       : { inactive: true, text: '+10% on the next melee hit after teleporting' }),
+  },
+  {
+    // "Increases all explosion damage dealt by 25%" (NEU lore): Wither Impact, Implosion, Explode, Guided Bat, Showtime.
+    // Taken as multiplicative (assumed).
+    id: 'implosion_belt', name: 'Implosion Belt', bonus: 'Consolidated', slot: 'equipment',
+    match: ids('IMPLOSION_BELT'), min: 1, full: 1,
+    effect: ({ explosion }) => (explosion
+      ? { multiplier: 1.25, text: '×1.25 explosion damage' }
+      : { inactive: true, text: '×1.25 explosion damage (Wither Impact, Implosion, Explode)' }),
   },
   { id: 'molten', name: 'Molten Set', bonus: 'Molten Core', slot: 'equipment',
     match: ids('MOLTEN_NECKLACE', 'MOLTEN_CLOAK', 'MOLTEN_BELT', 'MOLTEN_BRACELET'), min: 1, full: 4,
@@ -289,7 +309,7 @@ export function detectSets(pieces) {
  * inputs: { [setId]: { [key]: value } }
  */
 export function evaluateSets(detected, ctx, inputs = {}) {
-  const result = { status: [], additive: [], multiplicative: [], sources: [], statPct: 0, pieceStatPct: [], post: [], manaCostMult: 1 };
+  const result = { status: [], additive: [], multiplicative: [], sources: [], statPct: 0, pieceStatPct: [], post: [], manaCostMult: 1, auras: [] };
   for (const d of detected) {
     const { set } = d;
     const input = (key) => {
@@ -307,7 +327,7 @@ export function evaluateSets(detected, ctx, inputs = {}) {
     }
     const eff = set.effect({ ...ctx, count: d.count, tier: d.tier, helmet: d.helmet, input });
     const label = `${set.name}: ${set.bonus}`;
-    const active = !eff.inactive && !!(eff.additive || eff.multiplier || eff.stats || eff.statPct || eff.pieceStatPct || eff.post || eff.manaCost);
+    const active = !eff.inactive && !!(eff.additive || eff.multiplier || eff.stats || eff.statPct || eff.pieceStatPct || eff.post || eff.manaCost || eff.aura);
     result.status.push({ ...base, active, text: `${set.bonus}: ${eff.text}` });
     if (eff.inactive) continue;
     if (eff.additive) result.additive.push({ label, value: eff.additive });
@@ -317,6 +337,7 @@ export function evaluateSets(detected, ctx, inputs = {}) {
     if (eff.pieceStatPct) result.pieceStatPct.push({ ids: d.ids, pct: eff.pieceStatPct, label });
     if (eff.post) result.post.push({ label, fn: eff.post });
     if (eff.manaCost) result.manaCostMult *= eff.manaCost;
+    if (eff.aura) result.auras.push(eff.aura);
   }
   return result;
 }

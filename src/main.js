@@ -12,7 +12,7 @@ import { PHASE_LABELS } from './bossMechanics.js';
 import { summarize } from './simResults.js';
 import { fromInstability } from './clock.js';
 import { mobSprite } from './data/mobSprites.js';
-import { PRESET_SECTIONS, STAGES, PRESETS_REVIEWED, presetState } from './data/presets.js';
+import { PRESET_SECTIONS, STAGES, PRESETS_REVIEWED, presetState, tunePreset } from './data/presets.js';
 import {
   weaponAbility, WITHER_BLADES, WITHER_SCROLLS, greedBase, mageStats, mageCooldownPct, DEPLOYABLES, MANA_POTION_MAX,
 } from './data/abilities.js';
@@ -26,7 +26,7 @@ import {
   ENCHANTS, POWERS, TUNING_PER_POINT, tuningPoints, powerMultiplier, SHARDS, MOB_TYPES, ENEMIES,
   ARMOR_REFORGES, RARITIES, GEMS, GEM_QUALITIES, SLOT_ACCEPTS, GEM_FILL_PRIORITY, gemValue,
   DUNGEON_MODES, PROGRESSION_ITEMS, maxStars, starMultiplier,
-  POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus,
+  POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus, COUNTER_ITEMS, counterValues,
   ENCHANT_CONFLICTS, enchantConflict, ultimatesFor, enchantFits, TARGET_FAMILIES, weaponMultipliers, assumedAccessories, WEAPON_ABILITIES,
   DAGGER_FAMILIES, daggerFamily, daggerPartner, ARMOR_ULTIMATES, ARMOR_ENCHANTS,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
@@ -390,6 +390,9 @@ function anvilControls(kind, path) {
   const price = PRICE_ITEMS[item.id];
   const greed = price ? greedBonus(item.id, getPath(`${path}.price`)) : 0;
   const greedSpell = kind === 'weapon' ? weaponAbility({ item })?.greed && weaponAbility({ item }) : null;
+  // Counter weapons (Pooch Sword, Emerald Blade…): the counts their stats grow with.
+  const counter = kind === 'weapon' && COUNTER_ITEMS[item.id];
+  const counterStats = counter ? statText(counter.stats(counterValues(counter, getPath(path)))) : '';
   return h('div', { class: 'anvil' },
     selectField('Hot Potato Books', `${path}.hpb`, bookOpts(HOT_POTATO_MAX, 0), { num: true, rerender: true }),
     hpb >= HOT_POTATO_MAX
@@ -406,6 +409,10 @@ function anvilControls(kind, path) {
       h('input', { type: 'number', min: 0, step: 100000, value: getPath(`${path}.price`) ?? '', placeholder: '0',
         'data-path': `${path}.price`, 'data-num': '1', 'data-rerender': '1' }),
       h('span', { class: 'muted' }, `Greed: ${fmt(greedBase(greedSpell, getPath(`${path}.price`)))} base ability damage`)) : '',
+    ...(counter ? counter.inputs.map((i, k) => h('label', { class: 'field' }, `${i.label} (max ${fmt(i.max)})`,
+      h('input', { type: 'number', min: 0, max: i.max, step: i.step || 1, value: getPath(`${path}.counters.${i.key}`) ?? '', placeholder: String(i.def),
+        'data-path': `${path}.counters.${i.key}`, 'data-num': '1', 'data-rerender': '1' }),
+      k === counter.inputs.length - 1 ? h('span', { class: 'muted' }, counterStats) : '')) : []),
   );
 }
 
@@ -662,14 +669,19 @@ function weaponSection() {
   // swings, casts, or both.
   const witherBlade = !!weapon && WITHER_BLADES.includes(weapon.id.replace(/^STARRED_/, ''));
   const spell = weaponAbility({ item: weapon, scrolls: state.weapon.scrolls });
-  const spellText = spell && [`${fmt(spell.mana)} mana`, spell.cooldown ? `${spell.cooldown} s cooldown` : 'no cooldown',
-    spell.over ? `damage over ${spell.over} s` : ''].filter(Boolean).join(', ');
+  const spellText = spell && (spell.meleeHit
+    ? [`${spell.meleeHit.count > 1 ? `${spell.meleeHit.count} × ` : ''}${spell.meleeHit.pct}% of a melee hit`,
+      spell.charges ? `${spell.charges.max} charges, one back every ${spell.charges.every} s` : `${spell.cooldown} s cooldown`,
+      spell.healthCost ? `${spell.healthCost} Health` : ''].filter(Boolean).join(', ')
+    : [`${fmt(spell.mana)} mana`, spell.cooldown ? `${spell.cooldown} s cooldown` : 'no cooldown',
+      spell.over ? `damage over ${spell.over} s` : ''].filter(Boolean).join(', '));
   // Blaze Slayer daggers come in pairs: the simulation swaps to a dagger of the other family
   // (same upgrades as this one) when the Inferno Demonlord's shield needs it.
   const family = daggerFamily(weapon?.id);
   const secondOpts = family ? DAGGER_FAMILIES[family === 'fire' ? 'twilight' : 'fire'].ids
     .map((id) => byId.get(id)).filter(Boolean).map((i) => ({ value: i.id, label: i.name, cls: `tier tier-${i.tier}` })) : [];
   const bonusText = weaponMultipliers(weapon?.id).map((r) => {
+    if (r.perMissingHp && r.always) return `up to ×${1 + r.perMissingHp} ${r.label}`;
     if (r.label) return `×${r.mult} ${r.label}`;
     const against = (r.mobs || r.families).join('/');
     return r.perMissingHp ? `up to ×${1 + r.perMissingHp} vs ${against} (scales with missing HP)` : `×${r.mult} vs ${against}`;
@@ -1082,7 +1094,7 @@ function waterMatters() {
 // Set while the user is editing a preset enemy's stats (the "Edit" link); a new enemy resets it.
 let editingEnemy = false;
 
-function chooseEnemy(name) {
+function chooseEnemy(name, rerender = true) {
   editingEnemy = false;
   const e = ENEMIES.find((x) => x.name === name);
   state.target.enemy = e ? name : '';
@@ -1093,7 +1105,7 @@ function chooseEnemy(name) {
     syncDungeonMode(); // picks a floor the mob spawns on
     applyFloorStats(e);
   }
-  rerenderForm();
+  if (rerender) rerenderForm();
 }
 
 // Regular dungeon mobs: fill Target max HP and defense from the chosen floor (DUNGEON_FLOORS).
@@ -1388,11 +1400,16 @@ function loadPreset(key, keepTarget) {
   const prev = state;
   state = deepMerge(defaultState(), r.state);
   state.sim = prev.sim; // simulation settings aren't part of a build
-  if (keepTarget) {
-    Object.assign(state, { target: prev.target, dungeonMode: prev.dungeonMode, dungeonFloor: prev.dungeonFloor });
-    rerenderForm();
-  } else if (r.target) chooseEnemy(r.target);
-  else rerenderForm();
+  if (keepTarget) Object.assign(state, { target: prev.target, dungeonMode: prev.dungeonMode, dungeonFloor: prev.dungeonFloor });
+  else if (r.target) chooseEnemy(r.target, false);
+  // What the calculator decides against the target: Giant / Titan Killer, equipment, armor ultimates,
+  // shards, and the power stone with the tuning.
+  const t = tunePreset(buildInput(), r.tune);
+  state.weapon.enchants = t.enchants;
+  if (t.equipment) EQUIP_SLOTS.forEach(({ key }) => { state.equipment[key] = { ...state.equipment[key], ...t.equipment[key] }; });
+  ARMOR_SLOTS.forEach((s, i) => { if (state.armor[s].id && t.armorUltimates[i]) state.armor[s].ultimate = t.armorUltimates[i]; });
+  Object.assign(state, { shards: t.shards, power: t.power, tuning: t.tuning });
+  rerenderForm();
 }
 
 // Generic two-way binding via data-path
@@ -1802,7 +1819,8 @@ function renderSim(body, startDelay = 0) {
   const bonusNames = [...new Set(events.flatMap((e) => e.bonuses))];
   const procs = {
     ...(s.spellName ? { cast: proc(`${s.spellName} cast`) } : {}),
-    ...(s.fireTicks ? { fire: proc('Fire Aspect burn') } : {}),
+    ...(s.fireTicks || s.fistTicks || s.auraTicks || s.eyeTicks ? { fire: proc([s.fireTicks && 'Fire Aspect burn', s.fistTicks && 'Flaming Fist burn',
+      s.auraTicks && 'Blazing Aura', s.eyeTicks && 'Eye Beam'].filter(Boolean).join(' / ')) } : {}),
     hit: proc('Player hit'), ferocity: proc('Ferocity proc'), swipe: proc('Swipe proc'), bonus: proc('Other bonus proc', bonusNames),
   };
   // Boss phases (only those this fight has): lit for as long as the phase lasts, not flashed.
