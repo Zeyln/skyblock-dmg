@@ -1650,7 +1650,7 @@ function preloadEnemyPictures() {
 
 // Layouts of the simulation window, for testing (style.css, data-layout): buttons above the window
 // switch between them, and the pick is remembered in this browser.
-const SIM_LAYOUTS = [['', 'Original'], ['wide', 'Wide graph'], ['sidebar', 'Sidebar'], ['dashboard', 'Dashboard']];
+const SIM_LAYOUTS = [['', 'Original'], ['dashboard', 'Dashboard']];
 const SIM_LAYOUT_KEY = 'dpscalc.simLayout';
 function simLayoutButtons() {
   let current = '';

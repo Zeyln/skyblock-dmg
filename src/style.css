@@ -910,25 +910,14 @@ button.primary:hover { color: var(--on-accent); }
 .sim-screen[data-layout] .sim-chart-wrap { flex: 1; min-height: 0; }
 .sim-screen[data-layout] .sim-chart { position: absolute; inset: 0; width: 100%; height: 100%; }
 .sim-screen[data-layout] .sim-status { grid-area: status; align-content: center; }
-/* Wide graph: the graph across the top, the lights, target and tiles in a row below. */
-.sim-screen[data-layout="wide"] .sim-body:has(> .sim-settings) {
-  grid-template: "controls controls controls" auto "graph graph graph" minmax(0, 1.5fr) "lights target status" minmax(0, 1fr) / 400px minmax(0, 1fr) 300px;
-}
-.sim-screen[data-layout="wide"] .sim-status { grid-template-columns: repeat(2, 1fr); }
-/* Sidebar: controls, tiles and lights down the left; the target, then the graph, on the right. */
-.sim-screen[data-layout="sidebar"] .sim-body:has(> .sim-settings) {
-  grid-template: "controls target" auto "status target" auto "lights target" minmax(0, 0.5fr) "lights graph" minmax(0, 1.6fr) / 280px minmax(0, 1fr);
-}
-.sim-screen[data-layout="sidebar"] .sim-controls { margin-left: 0; flex-wrap: wrap; }
-.sim-screen[data-layout="sidebar"] .sim-status { grid-template-columns: repeat(2, 1fr); }
 /* Dashboard: tiles across the top; the lights over the graph on the left, the target down the right. */
 .sim-screen[data-layout="dashboard"] .sim-body:has(> .sim-settings) {
   grid-template: "controls controls" auto "status status" auto "lights target" auto "graph target" minmax(0, 1fr) / minmax(0, 2fr) minmax(0, 1fr);
 }
 .sim-screen[data-layout="dashboard"] .sim-status { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-/* Wide graph and Dashboard: the action and phase lights side by side. */
-.sim-screen:is([data-layout="wide"], [data-layout="dashboard"]) .sim-indicators { flex-direction: row; gap: 24px; }
-.sim-screen:is([data-layout="wide"], [data-layout="dashboard"]) .sim-indicators > * { flex: 1 1 0; min-width: 0; }
+/* Dashboard: the action and phase lights side by side. */
+.sim-screen[data-layout="dashboard"] .sim-indicators { flex-direction: row; gap: 24px; }
+.sim-screen[data-layout="dashboard"] .sim-indicators > * { flex: 1 1 0; min-width: 0; }
 /* Dashboard: compact lights (each list wraps into a new column after 4 rows), so the graph under them gets the height. */
 .sim-screen[data-layout="dashboard"] .sim-body:has(> .sim-settings) { row-gap: 10px; }
 .sim-screen[data-layout="dashboard"] .sim-indicators > * { flex: 0 1 auto; }
