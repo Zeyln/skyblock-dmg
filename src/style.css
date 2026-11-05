@@ -699,16 +699,30 @@ button.danger { --face: var(--crit); background: var(--crit); --bc: var(--crit);
 button.danger:hover { --face: var(--danger-hover); background: var(--danger-hover); color: var(--on-accent); --bc: var(--danger-hover); }
 button.primary:hover { color: var(--on-accent); }
 .modal-check { margin: -6px 0 18px; font-size: 13px; }
-/* Build preset picker: three dropdowns and a summary of what loads. */
-.modal:has(.preset-pick) { width: min(600px, calc(100vw - 32px)); }
-/* Load preset: rows of buttons (category, build, stage), the picked one highlighted. */
-.preset-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+/* Load preset: three large panels (category, class, stage). Each shows its pick; hovering or
+   focusing one splits it into its options, stacked to fill the panel. */
+.modal:has(.preset-pick) { width: min(680px, calc(100vw - 32px)); }
+.preset-panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.preset-panel { display: grid; height: 270px; margin: 0; padding: 8px; outline: none; cursor: pointer; }
+.preset-panel > * { grid-area: 1 / 1; min-width: 0; transition: opacity .14s ease, visibility .14s; }
+.preset-face { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 8px; }
 .preset-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.preset-choices { display: flex; flex-wrap: wrap; gap: 6px; }
-.preset-choices button { padding: 6px 12px; white-space: nowrap; }
-/* Builds in an even grid, so a long list reads in columns. */
-.preset-choices.builds { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.preset-value { font-size: 19px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.preset-options { display: flex; flex-direction: column; gap: 6px; opacity: 0; visibility: hidden; }
+.preset-options button { flex: 1 1 0; min-height: 0; padding: 4px 8px; font-size: 13px; line-height: 1.2; }
+.preset-panel:is(:hover, :focus-visible, :has(:focus-visible)) .preset-face { opacity: 0; visibility: hidden; }
+.preset-panel:is(:hover, :focus-visible, :has(:focus-visible)) .preset-options { opacity: 1; visibility: visible; }
+.preset-panel:focus-visible { --bc: var(--accent); }
 .preset-pick .modal-check { margin: 4px 0 18px; }
+/* Phone width: no room for three tall panels, so each shows its options as a row of buttons. */
+@media (max-width: 540px) {
+  .preset-panels { grid-template-columns: 1fr; }
+  .preset-panel { height: auto; cursor: default; }
+  .preset-face { display: none; }
+  .preset-options { opacity: 1; visibility: visible; flex-flow: row wrap; }
+  .preset-options::before { content: attr(aria-label); flex-basis: 100%; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .preset-options button { flex: 0 0 auto; padding: 6px 12px; }
+}
 
 /* Simulate button in the damage panel, with a pixel play triangle drawn like the chevrons. */
 .sim-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 16px; }
@@ -1007,6 +1021,8 @@ input, button, .combo-btn, .combo-field, :is(.mobs, .chips) label, .tag, .count,
   clip-path: polygon(
     /* top-left */
     0 var(--c3), var(--c1) var(--c3), var(--c1) var(--c2), var(--c2) var(--c2), var(--c2) var(--c1), var(--c3) var(--c1), var(--c3) 0,
+    /* a pressed button's hover strip above it (nothing when --press is 0) */
+    var(--c3) calc(0px - var(--press, 0px)), calc(100% - var(--c3)) calc(0px - var(--press, 0px)),
     /* top-right */
     calc(100% - var(--c3)) 0, calc(100% - var(--c3)) var(--c1), calc(100% - var(--c2)) var(--c1), calc(100% - var(--c2)) var(--c2),
     calc(100% - var(--c1)) var(--c2), calc(100% - var(--c1)) var(--c3), 100% var(--c3),
@@ -1088,6 +1104,13 @@ button:not(.link):not(.logo):not(.combo-btn):not(.nav button), :is(.mobs, .chips
     100% calc(100% - var(--px) * 5), calc(100% - var(--px) * 2) calc(100% - var(--px) * 3),
     calc(100% - var(--px) * 4) calc(100% - var(--px)) !important;
   transform: translateY(var(--press));
+}
+/* The press moves the button's hover area down with it: a cursor on its top edge would leave it,
+   the button would pop back up under the cursor and be pressed again, in a loop. An invisible
+   strip fills the space it moved out of, so the hover holds. */
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button)::before, :is(.mobs, .chips) label::before {
+  /* placed from the padding box, so up past the one-pixel top border too */
+  content: ''; position: absolute; left: 0; right: 0; top: calc(0px - var(--px) - var(--press)); height: var(--press);
 }
 button:not(.link):not(.logo):not(.combo-btn):not(.nav button):hover:not(:disabled), :is(.mobs, .chips) label:hover { --press: calc(var(--px) / 2); }
 button:not(.link):not(.logo):not(.combo-btn):not(.nav button):active:not(:disabled), :is(.mobs, .chips) label:active { --press: var(--px); }

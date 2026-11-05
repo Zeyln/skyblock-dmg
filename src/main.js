@@ -1348,24 +1348,38 @@ function openPresetModal() {
     sectionId = section.id; buildId = build.id; stage = preset.stage;
     return { section, build, key: `${section.id}/${build.id}/${preset.stage}` };
   };
-  // Every choice on show as buttons: the category, its builds, then the build's stages; one click each.
+  // Three large panels (category, class, stage), each showing its pick; hovering or focusing one
+  // splits it into its options.
   const body = h('div', { class: 'preset-pick' });
-  const choices = (label, options, current, onPick, cls = '') => h('div', { class: 'preset-row' },
-    h('span', { class: 'preset-label' }, label),
-    h('div', { class: `preset-choices ${cls}`, role: 'group', 'aria-label': label }, options.map(([id, text]) =>
-      h('button', { type: 'button', class: id === current ? 'primary' : '', 'aria-pressed': String(id === current), onclick: () => onPick(id) }, text))));
+  const panel = (label, options, current, onPick) => {
+    const text = options.find(([id]) => id === current)?.[1] ?? '';
+    return h('div', { class: 'sub preset-panel', tabindex: '0', 'data-panel': label, 'aria-label': `${label}: ${text}` },
+      h('div', { class: 'preset-face', 'aria-hidden': 'true' },
+        h('span', { class: 'preset-label' }, label),
+        h('span', { class: 'preset-value' }, text)),
+      h('div', { class: 'preset-options', role: 'group', 'aria-label': label }, options.map(([id, t]) =>
+        h('button', { type: 'button', class: id === current ? 'primary' : '', 'data-id': id, 'aria-pressed': String(id === current), onclick: () => onPick(id) }, t))));
+  };
   const render = () => {
+    // A pick rebuilds the panels: keep keyboard focus on the same option.
+    const focused = document.activeElement?.closest?.('.preset-panel');
+    const refocus = focused && body.contains(focused) && [focused.dataset.panel, document.activeElement.dataset.id];
     const { section, build, key } = pick();
     const r = presetState(key, byId);
     body.replaceChildren(
-      choices('Category', PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id, (v) => { sectionId = v; buildId = ''; render(); }),
-      choices('Build', section.builds.map((b) => [b.id, b.name]), build.id, (v) => { buildId = v; render(); }, 'builds'),
-      choices('Stage', (section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage, (v) => { stage = v; render(); }),
+      h('div', { class: 'preset-panels' },
+        panel('Category', PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id, (v) => { sectionId = v; buildId = ''; render(); }),
+        panel('Class', section.builds.map((b) => [b.id, b.name]), build.id, (v) => { buildId = v; render(); }),
+        panel('Stage', (section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage, (v) => { stage = v; render(); })),
       r.missing.length ? h('p', { class: 'hint' }, `Not in the item list (left empty): ${r.missing.join(', ')}`) : '',
       h('label', { class: 'check modal-check' },
         h('input', { type: 'checkbox', checked: keepTarget, onchange: (e) => { keepTarget = e.target.checked; } }),
         'Keep my current target'),
     );
+    if (refocus) {
+      const p = body.querySelector(`.preset-panel[data-panel="${refocus[0]}"]`);
+      (p?.querySelector(`button[data-id="${refocus[1]}"]`) || p)?.focus();
+    }
   };
   render();
   confirmModal({
