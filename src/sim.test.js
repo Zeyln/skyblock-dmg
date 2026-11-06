@@ -891,3 +891,40 @@ describe('run curves for the graph (runRecord)', () => {
     }
   });
 });
+
+describe('arrows per shot', () => {
+  const terminator = { id: 'TERMINATOR', name: 'Terminator', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 310, ATTACK_SPEED: 40 } };
+  const shoot = (extra) => simulate(noCrit({ item: terminator }, extra), { duration: 10 });
+
+  it('Terminator lands all 3 arrows where there are no invincibility frames, 1 elsewhere', () => {
+    const one = shoot({ target: { enemy: 'Voidgloom Seraph IV', maxHp: 0, boss: true } }); // slayer: has them
+    const three = shoot({ dungeonMode: 'catacombs', target: { enemy: 'Maxor (F7)', maxHp: 0, boss: true } });
+    const kuudra = shoot({ target: { enemy: 'Kuudra (Lair phase, Infernal)', maxHp: 0, boss: true } });
+    expect(three.hits).toBe(3 * one.hits);
+    expect(kuudra.hits).toBe(3 * one.hits);
+    // The same custom target: each arrow is a full hit.
+    const out = shoot({ target: { maxHp: 0 } });
+    const inside = shoot({ dungeonMode: 'catacombs', target: { maxHp: 0 } });
+    expect(inside.total).toBe(3 * out.total);
+    expect(three.notes.some((n) => n.startsWith('Terminator: all 3 arrows'))).toBe(true);
+  });
+
+  it('Archer Doubleshot adds copies of the middle arrow (101% at 50, doubled with no dupes)', () => {
+    const bow = { id: 'TEST_BOW', name: 'Bow', category: 'BOW', tier: 'LEGENDARY', stats: { DAMAGE: 500 } };
+    const at = (cls) => simulate(noCrit({ item: bow }, { dungeonMode: 'catacombs', dungeonClass: cls }), { duration: 10 });
+    const plain = at({ id: 'berserk', level: 50 });
+    const archer = at({ id: 'archer', level: 50 });
+    const solo = at({ id: 'archer', level: 50, solo: true });
+    // 2 arrows a shot (1% of shots 3), 3 solo (2% of shots 4).
+    expect(archer.hits / plain.hits).toBeGreaterThanOrEqual(2);
+    expect(archer.hits / plain.hits).toBeLessThan(2.1);
+    expect(solo.hits / plain.hits).toBeGreaterThanOrEqual(3);
+    expect(solo.hits / plain.hits).toBeLessThan(3.1);
+    // Terminator + Archer 50 in a dungeon: 3 arrows + 1 copy.
+    const term = simulate(noCrit({ item: terminator }, { dungeonMode: 'catacombs', dungeonClass: { id: 'archer', level: 50 },
+      target: { enemy: 'Maxor (F7)', maxHp: 0, boss: true } }), { duration: 10 });
+    const termPlain = shoot({ target: { enemy: 'Voidgloom Seraph IV', maxHp: 0, boss: true } });
+    expect(term.hits / termPlain.hits).toBeGreaterThanOrEqual(4);
+    expect(term.hits / termPlain.hits).toBeLessThan(4.1);
+  });
+});

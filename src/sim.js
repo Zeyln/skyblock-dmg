@@ -4,6 +4,7 @@ import {
   FABLED_MAX_BONUS, DOMINUS_GAIN_S, DOMINUS_MAX, DOMINUS_SWIPE_MULT, HEAD_LOOK_S, HEAD_BATCH, TERMINATOR_MP, TERMINATOR_ARROWS,
   LEAP_AIM_S, WEB_SWAP_S, HELLION_ORDER, HELLION_SWITCH_HITS, HELLION_REDUCTION,
   DAGGER_FAMILIES, daggerFamily, FEROCITY_DELAY_S, FEROCITY_GAP_S, WEAPON_ABILITIES, enemyBlocks,
+  doubleshotChance, noIframes, TERMINATOR_SIDE_ARROWS,
 } from './data/mechanics.js';
 import { phaseKinds, despawnSeconds, regenPerSecond, blockNotes, hpLines, scheduledPhases } from './bossMechanics.js';
 import { DUNGEON_HIT_MANA, EYE_BEAM } from './data/abilities.js';
@@ -91,6 +92,12 @@ function fight(input, opts, skip) {
   const weaponId = input.weapon?.item?.id;
   const ticksPerHit = !bow ? meleeHitTicks(base.totals.ATTACK_SPEED || 0)
     : SHORTBOWS.includes(weaponId) ? shortbowTicks(base.totals.ATTACK_SPEED || 0) : BOW_DRAW_TICKS;
+  // Arrows a shot adds to the middle one: the Terminator's two side arrows where the enemy has no
+  // invincibility frames (best case: close enough that all three land), and Archer's Doubleshot copies
+  // of the middle arrow in dungeons. Each arrow rolls its own crit and Ferocity.
+  const sideArrows = bow && weaponId === 'TERMINATOR' && noIframes(input.target?.enemy, base.inDungeon) ? TERMINATOR_SIDE_ARROWS : 0;
+  const doubleshot = bow && base.inDungeon && input.dungeonClass?.id === 'archer'
+    ? doubleshotChance(input.dungeonClass.level, input.dungeonClass.solo) : 0;
   const fabled = !bow && input.weapon?.reforge === 'fabled';
   const crimson = !bow && base.setStatus.find((s) => s.set.id === 'crimson' && s.count >= 2);
   const dominusEvery = crimson ? DOMINUS_GAIN_S[Math.min(crimson.count, 4)] : 0;
@@ -683,6 +690,12 @@ function fight(input, opts, skip) {
     let swipeReady = false;
     let step = ticksPerHit;
     let hitMult = 1; // Static Charge's discharge, on the hit itself
+    // A shot's other arrows: their damage, their Ferocity strikes' damage, and the strike count.
+    let arrows = 1;
+    let arrowCrits = 0;
+    let extraHit = 0;
+    let extraFero = 0;
+    let extraStrikes = 0;
     const bonuses = [];
     if (swing) {
       // Dominus: a melee hit gains a stack if the last one was long enough ago; at 10 stacks it swipes.
@@ -715,6 +728,20 @@ function fight(input, opts, skip) {
       let fero = Math.min(FEROCITY_CAP, Math.max(0, r.totals.FEROCITY || 0));
       if (shieldB?.feroDivisor && !shield) fero /= shieldB.feroDivisor;
       strikes = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
+      // The shot's other arrows (side arrows, Doubleshot copies): each its own crit, Overload and Ferocity.
+      const extra = bow ? sideArrows + Math.floor(doubleshot / 100) + (random() * 100 < doubleshot % 100 ? 1 : 0) : 0;
+      arrows = 1 + extra;
+      arrowCrits = crit ? 1 : 0;
+      for (let k = 0; k < extra; k++) {
+        const c = random() * 100 < r.critChance;
+        let d = c ? r.crit : r.nonCrit;
+        if (c && r.megaChance && random() * 100 < r.megaChance) d = r.megaCrit;
+        const s = Math.floor(fero / 100) + (random() * 100 < fero % 100 ? 1 : 0);
+        if (c) { crit = true; arrowCrits++; }
+        extraHit += d;
+        extraFero += d * s;
+        extraStrikes += s;
+      }
       // Static Charge: charges come every 30 s (at most 2); a hit discharges them all.
       if (base.staticCharge) {
         while (tick >= nextCharge) {
@@ -728,9 +755,10 @@ function fight(input, opts, skip) {
           bonuses.push('Static Charge');
         }
       }
-      out.hits++;
-      if (crit) out.crits++;
-      out.ferocity += strikes;
+      out.hits += arrows;
+      out.crits += bow ? arrowCrits : crit ? 1 : 0;
+      out.ferocity += strikes + extraStrikes;
+      if (arrows > 1) bonuses.push(`${arrows} arrows`);
       nextSwing = tick + step;
       if (hitMana) mana = Math.min(maxMana, mana + hitMana);
     } else if (action === 'fire') {
@@ -800,7 +828,8 @@ function fight(input, opts, skip) {
 
     if (shield) {
       // The shield takes hits, not damage; hits until it breaks still count, even with strikes on their way.
-      shield.times.push(t);
+      strikes += extraStrikes;
+      for (let k = 0; k < arrows; k++) shield.times.push(t);
       for (let k = 0; k < strikes; k++) shield.times.push(t + FEROCITY_DELAY_S + k * FEROCITY_GAP_S);
       if (shield.times.length >= shield.hits) shield.breakAt = [...shield.times].sort((a, b) => a - b)[shield.hits - 1];
       record({ t, w, hit: 0, crit, ferocity: strikes, swipe: 0, bonuses: [], damage: 0, total, hp, shielded: true, sid: shield, tid: 'boss', tidStart: startHp, ...mark }, 0);
@@ -818,13 +847,16 @@ function fight(input, opts, skip) {
     // Hellion Shield: an unmatched hit and every Ferocity strike lose 99%; enchant damage
     // (lightning, swipes) gets through in full.
     const shieldCut = (x) => Math.floor(x * (1 - HELLION_REDUCTION));
-    const hitDmg = Math.floor((matched || periodic ? dmg : shieldCut(dmg)) * hitMult + 1e-6); // burns and the aura get through too
+    // A shot's other arrows add their own damage and Ferocity strikes.
+    const hitDmg = Math.floor((matched || periodic ? dmg : shieldCut(dmg)) * hitMult + 1e-6) // burns and the aura get through too
+      + (matched ? extraHit : shieldCut(extraHit));
     const feroDmg = need ? shieldCut(dmg) : dmg;
+    const feroPart = feroDmg * strikes + (need ? shieldCut(extraFero) : extraFero);
+    strikes += extraStrikes;
     out.damage[swing ? 'hits' : periodic ? action : 'ability'] += hitDmg;
-    out.damage.ferocity += feroDmg * strikes;
+    out.damage.ferocity += feroPart;
     out.damage.lightning += bolt;
     out.damage.swipes += swipe;
-    const feroPart = feroDmg * strikes;
     const dealt = hitDmg + feroPart + bolt + swipe;
     total += dealt;
     if (demon) {
@@ -999,7 +1031,10 @@ function fight(input, opts, skip) {
   if (despawned) notes.push(`The boss despawned after ${despawnS / 60} minutes: the Slayer quest failed.`);
   else if (mode === 'kill' && killedAt === null) notes.push(`The enemy was still alive after ${SIM_MAX_SECONDS / 60} minutes; the fight was stopped.`);
   if (bow && !SHORTBOWS.includes(weaponId)) notes.push('Bows are assumed fully drawn: one shot per second.');
-  if (weaponId === 'TERMINATOR') notes.push('Terminator fires 3 arrows per shot; only one is counted.');
+  if (weaponId === 'TERMINATOR') notes.push(sideArrows
+    ? 'Terminator: all 3 arrows of a shot land (no invincibility frames here; assumes close range), each its own crit and Ferocity.'
+    : 'Terminator fires 3 arrows per shot; this enemy has invincibility frames, so one counts.');
+  if (doubleshot) notes.push(`Archer Doubleshot: ${doubleshot}% chance a shot fires a copy of its middle arrow${doubleshot > 100 ? ' (over 100%: one always, the rest a chance at another)' : ''}.`);
   if (crimson) notes.push('Dominus swipe timing is estimated: one swipe per stack gain while at 10 stacks.');
   if (fireFx) notes.push(`${fireFx.label}: ${fireFx.pct}% of the igniting hit each second for ${fireFx.seconds} s; later hits refresh it and raise it if stronger.`);
   if (burnMult !== 1 && (fireFx || fistOn)) notes.push(`Rekindle: burning damage ×${+burnMult.toFixed(2)}.`);

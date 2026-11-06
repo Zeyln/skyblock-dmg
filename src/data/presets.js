@@ -45,6 +45,13 @@ const SHARD_LEVEL = { early: 3, mid: 6, end: 10 };
 // The conditions the presets assume: teammates nearby (Legion: a dungeon party of 5, a Kuudra party
 // of 4, solo elsewhere), experience levels (Wisdom).
 const PLAYERS_NEARBY = { dungeon: 4, kuudra: 3 };
+// Dungeon Blessings at the boss (assumed, not from a source): Power grows with the floor; Time V is the
+// Quiz puzzle's (Floor IV and up); Forbidden Blessing from the Wither Essence shop as it gets bought.
+const BLESSINGS_AT = {
+  early: { power: 10, time: 5, forbidden: 0 },
+  mid: { power: 20, time: 5, forbidden: 5 },
+  end: { power: 30, time: 5, forbidden: 10 },
+};
 const EXP_LEVELS = { early: 50, mid: 100, end: 100 };
 // Power stones the calculator compares, by style (the damage ones).
 const POWER_CHOICES = {
@@ -353,6 +360,7 @@ export function presetState(key, byId) {
     petExtras: { bankCoins: pet.bank || 0, magicFind: 0, goldDigits: pet.goldDigits || 0 },
     combatLevel: lv.combat, catacombsLevel: lv.cata, skyblockLevel: lv.sb,
     dungeonClass: { id: build.cls || '', level: lv.cls, solo: false },
+    blessings: { power: 0, time: 0, stone: 0, wisdom: 0, life: 0, forbidden: 0, ...(inDungeon ? BLESSINGS_AT[level] : {}) },
     godPotion: lv.god, deployable: preset.deployable || '',
     player: { nearbyPlayers: PLAYERS_NEARBY[section.id] || 0, expLevels: EXP_LEVELS[level] },
   };

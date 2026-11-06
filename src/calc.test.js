@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { calculate, itemStats, rarityIndex, reforgeTable } from './calc.js';
 import {
   powerMultiplier, combatWarriorBonus, POWERS, greedBonus, enchantConflict, floorLabel, catacombsBoost,
-  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats, ENCHANTS, ultimatesFor, assumedAccessories,
+  ENEMIES, MOB_TYPES, enemyDungeonMode, floorStats, ENCHANTS, ultimatesFor, assumedAccessories, blessingBoost, blessingStats,
 } from './data/mechanics.js';
 import { petNumbers, cleanLore } from './data/pets.js';
 import { parseFormatting, stripFormatting, hasFormatting, MC_COLORS } from './mctext.js';
@@ -1125,5 +1125,36 @@ describe('armor enchantments', () => {
     const r = calculate({ weapon: sw(), armor: [helm({ enchants: { thorns: 3 }, ultimate: { id: 'last_stand', level: 5 } })] });
     expect(r.nonCrit).toBe(plain.nonCrit);
     expect(r.notes.some((n) => n.startsWith('Thorns'))).toBe(true);
+  });
+});
+
+describe('dungeon blessings', () => {
+  it('match the wiki examples (flat first, then each blessing % multiplied)', () => {
+    // Power IX, Forbidden Blessing IV, Floor VI, 1,000 Strength: about 1,279.66.
+    const b1 = blessingBoost({ forbidden: 4, floor: 6 });
+    expect(b1).toBeCloseTo(1.248);
+    expect(1000 + blessingStats({ STRENGTH: 1000 }, { power: 9 }, b1).STRENGTH).toBeCloseTo(1279.66, 1);
+    // Power XXIX and Time V, Paul, Forbidden Blessing X, Master Mode VII, 6,000 Strength: about 14,191.04.
+    const b2 = blessingBoost({ paul: true, forbidden: 10, floor: 7 });
+    expect(b2).toBeCloseTo(1.65);
+    expect(6000 + blessingStats({ STRENGTH: 6000 }, { power: 29, time: 5 }, b2).STRENGTH).toBeCloseTo(14191.04, 0);
+  });
+
+  it('no floor buff below Floor III; Faker strengthens them', () => {
+    expect(blessingBoost({ floor: 2 })).toBe(1);
+    expect(blessingBoost({ floor: 3 })).toBeCloseTo(1.2);
+    expect(blessingBoost({ floor: 7, faker: 10 })).toBeCloseTo(1.32);
+  });
+
+  it('only count in dungeons, as a stat source', () => {
+    const w = { item: sword({ DAMAGE: 100, STRENGTH: 400 }) };
+    const blessings = { power: 10 };
+    const out = calculate({ weapon: w, blessings, dungeonFloorNumber: 7 });
+    const inside = calculate({ weapon: w, blessings, dungeonFloorNumber: 7, dungeonMode: 'catacombs' });
+    expect(out.totals.STRENGTH).toBe(400);
+    // (400 + 10 × 4 × 1.2) × (1 + 10 × 2% × 1.2) = 448 × 1.24
+    expect(inside.totals.STRENGTH).toBeCloseTo(448 * 1.24);
+    expect(inside.sources.some((s) => s.label.startsWith('Blessings: Power X'))).toBe(true);
+    expect(inside.crit).toBeGreaterThan(out.crit);
   });
 });

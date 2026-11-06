@@ -896,6 +896,8 @@ export const SHARDS = [
   { id: 'storm_elem', name: 'Storm Elemental', shard: 'Tempest', kind: 'stat', stat: 'STRENGTH', perLevel: 1 },
   { id: 'unlimited_power', name: 'Unlimited Power', shard: 'Jormung', kind: 'statPct', stat: 'STRENGTH', perLevel: 0.1 },
   { id: 'unlimited_energy', name: 'Unlimited Energy', shard: 'Etherdrake', kind: 'statPct', stat: 'CRITICAL_DAMAGE', perLevel: 0.1 },
+  // Blessings +1% stronger per level (wiki, Dungeon Blessing); applied with the blessings in calc.js.
+  { id: 'faker', name: 'Faker', shard: 'Mimic', kind: 'blessing', perLevel: 1 },
   // +1% mana regeneration per level (wiki, XYZ Shard).
   { id: 'mana_regeneration', name: 'Mana Regeneration', shard: 'XYZ', kind: 'stat', stat: 'MANA_REGEN', perLevel: 1 },
 ];
@@ -978,6 +980,62 @@ export function classDamageBonus(classId, level, bow, solo) {
   if (!passive) return 0;
   const lvl = Math.max(0, Math.min(CLASS_MAX_LEVEL, Math.floor(level || 0)));
   return (passive.base + passive.perLevel * lvl) * (solo ? 2 : 1);
+}
+
+// Archer's Doubleshot: a chance at a copy of the middle arrow (wiki, Archer: 50% chance, +1% a level,
+// "101%" at 50, so a base of 51); over 100% the rest is a chance at one more. Doubled with no dupes.
+export const DOUBLESHOT = { base: 51, perLevel: 1 };
+export const doubleshotChance = (level, solo) =>
+  (DOUBLESHOT.base + DOUBLESHOT.perLevel * Math.max(0, Math.min(CLASS_MAX_LEVEL, Math.floor(level || 0)))) * (solo ? 2 : 1);
+
+// Enemies without invincibility frames take every arrow of a multi-arrow shot (Terminator's side
+// arrows) as its own hit. Forum (Aug 2024, "Do terminator's 3 arrows actually give 3x DPS?"): every
+// boss and miniboss in dungeons, Kuudra, Mage Outlaw and Magma Boss; slayer bosses do have them.
+export const NO_IFRAME_ENEMIES = ['Mage Outlaw', 'Magma Boss'];
+export const noIframes = (enemyName, inDungeon) =>
+  !!inDungeon || /^Kuudra/.test(enemyName || '') || NO_IFRAME_ENEMIES.includes(enemyName);
+// Terminator: 3 arrows a shot, 1 straight and 2 at 5° to the sides (wiki, Terminator).
+export const TERMINATOR_SIDE_ARROWS = 2;
+
+// ---------- Dungeon Blessings (wiki, Dungeon Blessing) ----------
+// Each blessing's stats as [stat, % per level, flat per level]. Levels of the same blessing add up.
+export const BLESSINGS = [
+  { id: 'power', name: 'Power', stats: [['STRENGTH', 2, 4], ['CRITICAL_DAMAGE', 2, 4]] },
+  { id: 'time', name: 'Time', stats: [['HEALTH', 2, 4], ['DEFENSE', 2, 4], ['STRENGTH', 2, 4], ['INTELLIGENCE', 2, 4]] },
+  { id: 'stone', name: 'Stone', stats: [['DEFENSE', 2, 4], ['DAMAGE', 0, 6]] },
+  { id: 'wisdom', name: 'Wisdom', stats: [['INTELLIGENCE', 2, 4], ['WALK_SPEED', 0, 4]] },
+  { id: 'life', name: 'Life', stats: [['HEALTH', 3, 0]] }, // and +3% Health Regen a level (no damage effect)
+];
+// What makes blessings stronger; the boosts multiply each other: Paul's Benediction +25%, Forbidden
+// Blessing (Wither Essence shop) +1% a level, the Faker attribute (Mimic Shard) +1% a level, and +20%
+// on Floor III and up (Master Mode floors count as their regular floor).
+export const BLESSING_PAUL = 25;
+export const BLESSING_FLOOR = { from: 3, pct: 20 };
+export const FORBIDDEN_BLESSING_MAX = 10;
+export function blessingBoost({ paul, forbidden = 0, faker = 0, floor = null }) {
+  const floorBuff = floor == null || floor >= BLESSING_FLOOR.from ? BLESSING_FLOOR.pct : 0;
+  return (1 + (paul ? BLESSING_PAUL : 0) / 100) * (1 + forbidden / 100) * (1 + faker / 100) * (1 + floorBuff / 100);
+}
+// The stats blessings add to the player's current stats: every blessing's flat amount first, then
+// each blessing's % on top, one after another (multiplying), all scaled by the boost.
+export function blessingStats(totals, levels, boost) {
+  const flat = {};
+  const mult = {};
+  for (const b of BLESSINGS) {
+    const lvl = Math.max(0, Math.floor(levels?.[b.id] || 0));
+    if (!lvl) continue;
+    for (const [stat, pct, add] of b.stats) {
+      flat[stat] = (flat[stat] || 0) + lvl * add * boost;
+      mult[stat] = (mult[stat] || 1) * (1 + lvl * pct * boost / 100);
+    }
+  }
+  const out = {};
+  for (const stat of Object.keys(flat)) {
+    const now = totals[stat] || 0;
+    const gain = (now + flat[stat]) * mult[stat] - now;
+    if (gain) out[stat] = gain;
+  }
+  return out;
 }
 
 // ---------- Dungeon drops ----------

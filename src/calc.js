@@ -4,6 +4,7 @@ import {
   POTATO_STATS, HOT_POTATO_MAX, FUMING_POTATO_MAX, ART_OF_WAR, PRICE_ITEMS, greedBonus, COUNTER_ITEMS, counterValues,
   ULTIMATE_ENCHANTS, ultimatesFor, enchantFits, weaponCategory, ACCESSORY_EFFECTS, assumedAccessories, WEAPON_ABILITIES, enchantConflict, GOD_POTION, MAYOR_JERRY_STAT_PCT, QUALITY_MAX, floorLabel, isDungeonDrop,
   catacombsBoost, clampCatacombs, asDungeonItem, DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus,
+  BLESSINGS, blessingBoost, blessingStats, FORBIDDEN_BLESSING_MAX,
   LUST_FOR_BLOOD_PER_LEVEL, lustForBloodCap, EXTRA_INFLICTION, TWILIGHT_POISON_MULT, SKYBLOCK_LEVEL_STATS,
   POWERS, powerMultiplier, TUNING_PER_POINT, tuningPoints, SHARDS,
   ECHO_RULER_PER_LEVEL, ECHO_ECHOES_PER_LEVEL, combatWarriorBonus,
@@ -404,6 +405,7 @@ export function calculate(input) {
     const label = `${s.name} ${roman(lvl)} (${s.shard} Shard)`;
     if (s.kind === 'stat') { sources.push({ label, stats: { [s.stat]: v } }); continue; }
     if (s.kind === 'statPct') { statPct[s.stat] = (statPct[s.stat] || 0) + v; continue; }
+    if (s.kind === 'blessing') continue; // Faker: strengthens the blessings (below)
     if (s.melee && (bow || magic)) continue;
     if (s.bow && !bow) continue; // (magic counts as neither)
     if (!hitsMob(s.mobs, target)) continue;
@@ -558,6 +560,16 @@ export function calculate(input) {
   for (const stat of ['STRENGTH', 'CRITICAL_DAMAGE', 'CRITICAL_CHANCE', 'INTELLIGENCE', 'ABILITY_DAMAGE_PERCENT']) {
     const pct = (statPct[stat] || 0) + (statPct.__all || 0);
     if (pct) totals[stat] = (totals[stat] || 0) * (1 + pct / 100);
+  }
+  // Dungeon Blessings: a share of the player's current stats (dungeons only).
+  const bl = input.blessings || {};
+  if (dungeonFight && BLESSINGS.some((b) => bl[b.id] > 0)) {
+    const boost = blessingBoost({ paul: input.mayor === 'paul', forbidden: Math.min(FORBIDDEN_BLESSING_MAX, bl.forbidden || 0),
+      faker: (shards.faker || 0) * (SHARDS.find((s) => s.id === 'faker')?.perLevel || 0), floor: input.dungeonFloorNumber ?? null });
+    const gain = blessingStats(totals, bl, boost);
+    addStats(totals, gain);
+    const names = BLESSINGS.filter((b) => bl[b.id] > 0).map((b) => `${b.name} ${roman(Math.floor(bl[b.id]))}`);
+    sources.push({ label: `Blessings: ${names.join(', ')}${boost !== 1 ? ` (×${+boost.toFixed(3)} stronger)` : ''}`, stats: gain });
   }
   // Set effects derived from final stats (Tarantula helmet: CD from Strength; Mastiff: CD from Defense).
   for (const { label, fn } of sets.post) {

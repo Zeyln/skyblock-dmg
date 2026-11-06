@@ -31,6 +31,7 @@ import {
   DAGGER_FAMILIES, daggerFamily, daggerPartner, ARMOR_ULTIMATES, ARMOR_ENCHANTS,
   QUALITY_MAX, floorLabel, isDungeonDrop, catacombsBoost, CATACOMBS_MAX_LEVEL, clampCatacombs, asDungeonItem,
   DUNGEON_CLASSES, CLASS_MAX_LEVEL, classDamageBonus, enemyDungeonMode, floorStats,
+  BLESSINGS, blessingBoost, FORBIDDEN_BLESSING_MAX,
 } from './data/mechanics.js';
 
 const STATE_KEY = 'dpscalc.state.v1';
@@ -65,11 +66,13 @@ const defaultState = () => ({
   catacombsLevel: 0,
   dungeonMode: 'none',
   dungeonClass: { id: '', level: 50, solo: false },
+  // Dungeon Blessing levels, and the Forbidden Blessing perk (0-10).
+  blessings: { power: 0, time: 0, stone: 0, wisdom: 0, life: 0, forbidden: 0 },
   setInputs: {},
   godPotion: false,
   deployable: '', // Power Orb or Flare (data/abilities.js DEPLOYABLES)
   manaPotion: 0,
-  mayor: '', // '' | 'derpy' | 'jerry'
+  mayor: '', // '' | 'derpy' | 'jerry' | 'paul'
   bonuses: [
     { label: 'Pet effects not modeled' }, { label: 'Accessories (flat stats)' }, { label: 'Potions / buffs' }, { label: 'Other' },
   ],
@@ -922,13 +925,18 @@ function resolvedPet() {
   };
 }
 
+// Loads the chosen pet's lore (its stats come from it); resolves once it is in.
 function ensurePetLore() {
   const pet = resolvedPet();
-  if (!pet) return;
+  if (!pet) return Promise.resolve();
   const key = `${pet.id};${rarityIdx(pet.rarity)}`;
-  if (petLore.has(key)) return;
+  if (petLore.get(key)) return Promise.resolve();
+  const first = !petLore.has(key);
   petLore.set(key, null);
-  loadPetLore(pet.id, rarityIdx(pet.rarity)).then((lore) => { petLore.set(key, lore); update(); });
+  return loadPetLore(pet.id, rarityIdx(pet.rarity)).then((lore) => {
+    petLore.set(key, lore);
+    if (first) update();
+  });
 }
 
 function petItemEffect(id) {
@@ -1183,7 +1191,32 @@ function dungeonControls() {
   return h('div', { class: 'location' },
     ...controls,
     inDungeon ? h('span', { class: 'hint' }, `Dungeon items +${catacombsBoost(cata)}% (Catacombs ${cata})`) : '',
-    inDungeon ? classControls() : '');
+    inDungeon ? classControls() : '',
+    inDungeon ? blessingControls() : '');
+}
+
+// The floor number the fight is on (for the blessings' Floor III buff): from the boss's name, or the
+// floor picked for a regular dungeon mob; null when unknown (a custom target).
+function dungeonFloorNumber() {
+  const e = ENEMIES.find((x) => x.name === state.target.enemy);
+  if (e?.dungeon === 'either') return floorNumber(state.dungeonFloor || 'F7');
+  const m = e?.name.match(/\((?:F|M)(\d)/);
+  return m ? Number(m[1]) : null;
+}
+
+// Dungeon Blessing levels found this run; each adds a share of the player's current stats.
+function blessingControls() {
+  const bl = state.blessings;
+  const boost = blessingBoost({ paul: state.mayor === 'paul', forbidden: Math.min(FORBIDDEN_BLESSING_MAX, bl.forbidden || 0),
+    faker: state.shards.faker || 0, floor: dungeonFloorNumber() });
+  const on = BLESSINGS.filter((b) => bl[b.id] > 0);
+  const pcts = (b) => b.stats.filter(([, pct]) => pct).map(([stat, pct]) => `+${fmt(bl[b.id] * pct * boost, 1)}% ${STAT_LABELS[stat] || stat}`);
+  return h('div', { class: 'grid wide class-row' },
+    BLESSINGS.map((b) => numField(`Blessing of ${b.name}`, `blessings.${b.id}`, { min: 0, step: 1, rerender: true })),
+    numField(`Forbidden Blessing (0–${FORBIDDEN_BLESSING_MAX})`, 'blessings.forbidden', { min: 0, max: FORBIDDEN_BLESSING_MAX, step: 1, rerender: true }),
+    h('p', { class: 'hint', style: 'grid-column:1/-1;margin:0' }, on.length
+      ? `Blessings ×${+boost.toFixed(3)} stronger (floor, Paul, Forbidden Blessing, Faker): ${on.map((b) => `${b.name} ${bl[b.id]} ${pcts(b).join(', ')}`).join('; ')}`
+      : 'Blessings found this run add a share of your stats (Power: Strength and Crit Damage).'));
 }
 
 // Selected dungeon class + level; its damage passive only counts in dungeons.
@@ -1408,14 +1441,21 @@ function openPresetModal() {
   });
 }
 
-function loadPreset(key, keepTarget) {
+let presetLoad = 0; // the latest preset load; an older one still waiting is dropped
+async function loadPreset(key, keepTarget) {
   const r = presetState(key, byId);
   if (!r) return;
   const prev = state;
-  state = deepMerge(defaultState(), r.state);
-  state.sim = prev.sim; // simulation settings aren't part of a build
+  const next = deepMerge(defaultState(), r.state);
+  next.sim = prev.sim; // simulation settings aren't part of a build
+  state = next;
   if (keepTarget) Object.assign(state, { target: prev.target, dungeonMode: prev.dungeonMode, dungeonFloor: prev.dungeonFloor });
   else if (r.target) chooseEnemy(r.target, false);
+  // The pet's stats come from its lore: tune only once it is in, or the picks below would leave the
+  // pet out (and differ with network timing).
+  const load = ++presetLoad;
+  await ensurePetLore();
+  if (load !== presetLoad || state !== next) return;
   // What the calculator decides against the target: Giant / Titan Killer, equipment, armor ultimates,
   // shards, and the power stone with the tuning.
   const t = tunePreset(buildInput(), r.tune);
@@ -1494,6 +1534,8 @@ function buildInput() {
     twilightPoison: state.twilightPoison,
     mayor: state.mayor,
     dungeonClass: state.dungeonClass,
+    blessings: state.blessings,
+    dungeonFloorNumber: dungeonFloorNumber(),
     setInputs: state.setInputs,
     bonuses: state.bonuses,
     target: state.target,
@@ -2162,8 +2204,8 @@ function trackResultsOverflow() {
 
 // ---------- mayors ----------
 // Special mayors that change a hit (calc.js applies them).
-const MAYORS = { derpy: 'Derpy', jerry: 'Jerry' };
-const MAYOR_EFFECTS = { derpy: '2× mob health', jerry: '+10% combat stats' };
+const MAYORS = { derpy: 'Derpy', jerry: 'Jerry', paul: 'Paul' };
+const MAYOR_EFFECTS = { derpy: '2× mob health', jerry: '+10% combat stats', paul: 'Benediction: blessings +25%' };
 
 // ---------- theme ----------
 // The logo switches between the light and dark theme. index.html applies the saved (or system)
