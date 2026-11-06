@@ -1350,36 +1350,49 @@ function openPresetModal() {
   };
   // Three large panels (category, class, stage), each showing its pick; hovering or focusing one
   // splits it into its options.
-  const body = h('div', { class: 'preset-pick' });
-  const panel = (label, options, current, onPick) => {
-    const text = options.find(([id]) => id === current)?.[1] ?? '';
-    return h('div', { class: 'sub preset-panel', tabindex: '0', 'data-panel': label, 'aria-label': `${label}: ${text}` },
-      h('div', { class: 'preset-face', 'aria-hidden': 'true' },
-        h('span', { class: 'preset-label' }, label),
-        h('span', { class: 'preset-value' }, text)),
-      h('div', { class: 'preset-options', role: 'group', 'aria-label': label }, options.map(([id, t]) =>
-        h('button', { type: 'button', class: id === current ? 'primary' : '', 'data-id': id, 'aria-pressed': String(id === current), onclick: () => onPick(id) }, t))));
+  // The panels are built once and updated in place: a rebuilt panel under the cursor isn't
+  // hovered until the mouse moves, so it would flash its face before splitting again.
+  const makePanel = (label, onPick) => {
+    const value = h('span', { class: 'preset-value' });
+    const options = h('div', { class: 'preset-options', role: 'group', 'aria-label': label });
+    const el = h('div', { class: 'sub preset-panel', 'data-panel': label },
+      h('div', { class: 'preset-face', 'aria-hidden': 'true' }, h('span', { class: 'preset-label' }, label), value),
+      options);
+    let ids = '';
+    const update = (list, current) => {
+      // New options (another category or class): rebuild the slices, keeping focus on the pick.
+      if (list.map(([id]) => id).join() !== ids) {
+        const hadFocus = options.contains(document.activeElement);
+        ids = list.map(([id]) => id).join();
+        options.replaceChildren(...list.map(([id, t]) =>
+          h('button', { type: 'button', class: 'preset-slice', 'data-id': id, onclick: () => onPick(id) }, t)));
+        if (hadFocus) options.querySelector(`[data-id="${current}"]`)?.focus();
+      }
+      for (const b of options.children) b.setAttribute('aria-pressed', String(b.dataset.id === current));
+      value.textContent = list.find(([id]) => id === current)?.[1] ?? '';
+    };
+    return { el, update };
   };
+  const panels = {
+    category: makePanel('Category', (v) => { sectionId = v; buildId = ''; render(); }),
+    build: makePanel('Class', (v) => { buildId = v; render(); }),
+    stage: makePanel('Stage', (v) => { stage = v; render(); }),
+  };
+  const missing = h('p', { class: 'hint' });
+  const body = h('div', { class: 'preset-pick' },
+    h('div', { class: 'preset-panels' }, panels.category.el, panels.build.el, panels.stage.el),
+    missing,
+    h('label', { class: 'check modal-check' },
+      h('input', { type: 'checkbox', checked: keepTarget, onchange: (e) => { keepTarget = e.target.checked; } }),
+      'Keep my current target'));
   const render = () => {
-    // A pick rebuilds the panels: keep keyboard focus on the same option.
-    const focused = document.activeElement?.closest?.('.preset-panel');
-    const refocus = focused && body.contains(focused) && [focused.dataset.panel, document.activeElement.dataset.id];
     const { section, build, key } = pick();
     const r = presetState(key, byId);
-    body.replaceChildren(
-      h('div', { class: 'preset-panels' },
-        panel('Category', PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id, (v) => { sectionId = v; buildId = ''; render(); }),
-        panel('Class', section.builds.map((b) => [b.id, b.name]), build.id, (v) => { buildId = v; render(); }),
-        panel('Stage', (section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage, (v) => { stage = v; render(); })),
-      r.missing.length ? h('p', { class: 'hint' }, `Not in the item list (left empty): ${r.missing.join(', ')}`) : '',
-      h('label', { class: 'check modal-check' },
-        h('input', { type: 'checkbox', checked: keepTarget, onchange: (e) => { keepTarget = e.target.checked; } }),
-        'Keep my current target'),
-    );
-    if (refocus) {
-      const p = body.querySelector(`.preset-panel[data-panel="${refocus[0]}"]`);
-      (p?.querySelector(`button[data-id="${refocus[1]}"]`) || p)?.focus();
-    }
+    panels.category.update(PRESET_SECTIONS.map((x) => [x.id, x.name]), section.id);
+    panels.build.update(section.builds.map((b) => [b.id, b.name]), build.id);
+    panels.stage.update((section.stages || STAGES).filter(([id]) => build.presets.some((x) => x.stage === id)), stage);
+    missing.textContent = r.missing.length ? `Not in the item list (left empty): ${r.missing.join(', ')}` : '';
+    missing.hidden = !r.missing.length;
   };
   render();
   confirmModal({

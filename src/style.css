@@ -699,29 +699,41 @@ button.danger { --face: var(--crit); background: var(--crit); --bc: var(--crit);
 button.danger:hover { --face: var(--danger-hover); background: var(--danger-hover); color: var(--on-accent); --bc: var(--danger-hover); }
 button.primary:hover { color: var(--on-accent); }
 .modal-check { margin: -6px 0 18px; font-size: 13px; }
-/* Load preset: three large panels (category, class, stage). Each shows its pick; hovering or
-   focusing one splits it into its options, stacked to fill the panel. */
+/* Load preset: three large panels (category, class, stage), each showing its pick. The panel is
+   made of its options as slices, flush and seamless while idle; hovering (or tabbing into) it
+   opens gaps between them and gives each its own outline, so the panel splits into its options. */
 .modal:has(.preset-pick) { width: min(680px, calc(100vw - 32px)); }
 .preset-panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
-.preset-panel { display: grid; height: 270px; margin: 0; padding: 8px; outline: none; cursor: pointer; }
-.preset-panel > * { grid-area: 1 / 1; min-width: 0; transition: opacity .14s ease, visibility .14s; }
-.preset-face { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 8px; }
+.preset-panel { display: grid; height: 270px; margin: 0; padding: 0; cursor: pointer; }
+.preset-panel > * { grid-area: 1 / 1; min-width: 0; }
+.preset-face {
+  position: relative; z-index: 1; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 8px;
+}
 .preset-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .preset-value { font-size: 19px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
-.preset-options { display: flex; flex-direction: column; gap: 6px; opacity: 0; visibility: hidden; }
-.preset-options button { flex: 1 1 0; min-height: 0; padding: 4px 8px; font-size: 13px; line-height: 1.2; }
-.preset-panel:is(:hover, :focus-visible, :has(:focus-visible)) .preset-face { opacity: 0; visibility: hidden; }
-.preset-panel:is(:hover, :focus-visible, :has(:focus-visible)) .preset-options { opacity: 1; visibility: visible; }
-.preset-panel:focus-visible { --bc: var(--accent); }
+.preset-options { display: flex; flex-direction: column; gap: 0; pointer-events: none; }
+/* Idle slices: the panel's own face colour, outline included, and no text: one solid surface. */
+.preset-slice {
+  --face: var(--inset); --bc: var(--inset); color: transparent;
+  flex: 1 1 0; min-height: 0; padding: 4px 8px; font-size: 13px; line-height: 1.2;
+}
+.preset-panel:is(:hover, :has(:focus-visible)) { --face: transparent; --bc: transparent; }
+.preset-panel:is(:hover, :has(:focus-visible)) .preset-face { opacity: 0; }
+.preset-panel:is(:hover, :has(:focus-visible)) .preset-options { gap: 6px; pointer-events: auto; }
+.preset-panel:is(:hover, :has(:focus-visible)) .preset-slice { --bc: var(--line-strong); color: var(--text); }
+.preset-panel:is(:hover, :has(:focus-visible)) .preset-slice[aria-pressed="true"] { --face: var(--accent); --bc: var(--accent); color: var(--on-accent); }
+.preset-panel:is(:hover, :has(:focus-visible)) .preset-slice:is(:hover, :focus-visible):not([aria-pressed="true"]) { --bc: var(--accent); color: var(--accent-ink); }
 .preset-pick .modal-check { margin: 4px 0 18px; }
-/* Phone width: no room for three tall panels, so each shows its options as a row of buttons. */
+/* Phone width: the panels tile vertically, each as tall as its options in two columns;
+   a tap splits it the same way. */
 @media (max-width: 540px) {
-  .preset-panels { grid-template-columns: 1fr; }
-  .preset-panel { height: auto; cursor: default; }
-  .preset-face { display: none; }
-  .preset-options { opacity: 1; visibility: visible; flex-flow: row wrap; }
-  .preset-options::before { content: attr(aria-label); flex-basis: 100%; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-  .preset-options button { flex: 0 0 auto; padding: 6px 12px; }
+  .preset-panels { grid-template-columns: 1fr; gap: 8px; }
+  .preset-panel { height: auto; min-height: 96px; }
+  .preset-face { gap: 6px; }
+  .preset-value { font-size: 17px; }
+  .preset-options { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(34px, 1fr); }
+  .preset-slice { padding: 4px 6px; }
 }
 
 /* Simulate button in the damage panel, with a pixel play triangle drawn like the chevrons. */
@@ -1088,7 +1100,7 @@ input:not([type=checkbox]):not([type=radio]):not(.combo-input), button:not(.logo
    Pressing moves the button down into the wall's space while the wall shrinks by the same
    amount, so the bottom edge stays put: hover = half a pixel, click = a full pixel.
    Dropdown triggers look like fields and the header's text buttons are flat: no wall. */
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button), :is(.mobs, .chips) label {
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):not(.preset-slice), :is(.mobs, .chips) label {
   --press: 0px;
   --wall-c: color-mix(in srgb, var(--bc), #000 var(--wall-mix));
   --o: linear-gradient(var(--bc), var(--bc));
@@ -1108,12 +1120,12 @@ button:not(.link):not(.logo):not(.combo-btn):not(.nav button), :is(.mobs, .chips
 /* The press moves the button's hover area down with it: a cursor on its top edge would leave it,
    the button would pop back up under the cursor and be pressed again, in a loop. An invisible
    strip fills the space it moved out of, so the hover holds. */
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button)::before, :is(.mobs, .chips) label::before {
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):not(.preset-slice)::before, :is(.mobs, .chips) label::before {
   /* placed from the padding box, so up past the one-pixel top border too */
   content: ''; position: absolute; left: 0; right: 0; top: calc(0px - var(--px) - var(--press)); height: var(--press);
 }
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button):hover:not(:disabled), :is(.mobs, .chips) label:hover { --press: calc(var(--px) / 2); }
-button:not(.link):not(.logo):not(.combo-btn):not(.nav button):active:not(:disabled), :is(.mobs, .chips) label:active { --press: var(--px); }
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):not(.preset-slice):hover:not(:disabled), :is(.mobs, .chips) label:hover { --press: calc(var(--px) / 2); }
+button:not(.link):not(.logo):not(.combo-btn):not(.nav button):not(.preset-slice):active:not(:disabled), :is(.mobs, .chips) label:active { --press: var(--px); }
 
 /* Options, highlights and selection rows: square. */
 .combo-opt, .combo-opt mark, .nav button, .chain-row.total, mark { border-radius: 0; }
